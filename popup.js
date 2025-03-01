@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', function() {
           return;
         }
         handleScreenshotCapture(dataUrl, 'visible_screenshot.png', false);
-        statusDiv.textContent = 'Screenshot saved and opened in new tab!';
+        statusDiv.textContent = 'Screenshot ready! Opening in new tab for download.';
       });
     });
   });
@@ -62,9 +62,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Helper function to handle screenshot capture (download and display)
   function handleScreenshotCapture(dataUrl, filename, hasGaps) {
-    // Download the screenshot
-    downloadScreenshot(dataUrl, filename);
-
     // Store screenshot data in localStorage
     const screenshotData = {
       dataUrl: dataUrl,
@@ -155,42 +152,19 @@ document.addEventListener('DOMContentLoaded', function() {
   // Listen for messages from content script
   chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     if (request.action === "screenshotCaptured") {
-      let statusMessage = 'Full screenshot saved and opened in new tab!';
-      let baseFilename = 'full_screenshot';
-
-      if (request.isFallback) {
-        statusMessage = 'Full page capture failed. Saving visible area only.';
-        baseFilename = 'visible_screenshot';
-      } else if (request.hasGaps) {
-        statusMessage = 'Screenshot saved with some missing sections.';
-        baseFilename = 'partial_screenshot';
-      }
-
-      statusDiv.textContent = statusMessage;
-
-      // Get file extension from data URL
-      const isJpeg = request.dataUrl.startsWith('data:image/jpeg');
-      const extension = isJpeg ? 'jpg' : 'png';
-
-      // Handle the screenshot (download and display)
-      handleScreenshotCapture(
-        request.dataUrl,
-        `${baseFilename}.${extension}`,
-        request.hasGaps
-      );
+      handleScreenshotCapture(request.dataUrl, 'full_page_screenshot.png', request.hasGaps);
+      statusDiv.textContent = 'Screenshot ready! Opening in new tab for download.';
     }
 
     if (request.action === "progressUpdate") {
-      let statusText = `Capturing: ${request.progress}%`;
+      statusDiv.textContent = `Capturing: ${request.progress}%`;
       if (request.message) {
-        statusText += ` - ${request.message}`;
+        statusDiv.textContent += ` - ${request.message}`;
       }
-      statusDiv.textContent = statusText;
     }
 
     if (request.action === "captureError") {
       statusDiv.textContent = `Error: ${request.error}`;
-      console.error('Screenshot capture error:', request.error);
     }
   });
 });

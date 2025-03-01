@@ -44,6 +44,16 @@
       display: none;
     }
 
+    .info-banner {
+      background-color: #dff0d8;
+      color: #3c763d;
+      padding: 10px;
+      margin-bottom: 20px;
+      border-radius: 4px;
+      text-align: center;
+      display: none;
+    }
+
     .screenshot-container {
       background-color: white;
       border: 1px solid #ddd;
@@ -74,13 +84,24 @@
     .btn:hover {
       background-color: #3367d6;
     }
+
+    .btn-primary {
+      background-color: #34a853;
+      font-weight: bold;
+      padding: 10px 20px;
+      font-size: 16px;
+    }
+
+    .btn-primary:hover {
+      background-color: #2d9249;
+    }
   </style>
 </head>
 <body>
   <div class="header">
     <div class="title">Screenshot Viewer</div>
     <div>
-      <button id="downloadBtn" class="btn">Download</button>
+      <button id="downloadBtn" class="btn btn-primary">Download</button>
       <button id="closeBtn" class="btn">Close</button>
     </div>
   </div>
@@ -88,6 +109,10 @@
   <div class="container">
     <div id="warningBanner" class="warning-banner">
       Note: Some sections of the page couldn't be captured properly.
+    </div>
+
+    <div id="downloadInstructions" class="info-banner">
+      Your screenshot is ready. Click the Download button to save it to your computer.
     </div>
 
     <div class="screenshot-container">

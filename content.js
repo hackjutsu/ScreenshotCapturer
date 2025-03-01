@@ -106,25 +106,18 @@ async function captureFullPage() {
     }
 
     // Convert canvas to data URL
-    let fullPageDataUrl;
-    try {
-      fullPageDataUrl = canvas.toDataURL('image/png');
-    } catch (canvasError) {
-      console.error("Error converting canvas to data URL:", canvasError);
-      // If canvas is too large, try with JPEG format at lower quality
-      fullPageDataUrl = canvas.toDataURL('image/jpeg', 0.7);
-    }
+    const finalDataUrl = canvas.toDataURL('image/png');
 
-    // Send the full screenshot back to popup
+    // Send the screenshot data to the popup
     chrome.runtime.sendMessage({
       action: "screenshotCaptured",
-      dataUrl: fullPageDataUrl,
+      dataUrl: finalDataUrl,
       hasGaps: failedSegments.length > 0
     });
 
     // Restore original state
-    window.scrollTo(0, originalScrollPos);
     document.documentElement.style.overflow = originalOverflowStyle;
+    window.scrollTo(0, originalScrollPos);
 
   } catch (error) {
     console.error("Error capturing full page:", error);
@@ -218,7 +211,7 @@ async function tryFallbackMethod() {
       chrome.runtime.sendMessage({
         action: "screenshotCaptured",
         dataUrl: dataUrl,
-        isFallback: true
+        hasGaps: true
       });
       return;
     }
@@ -243,7 +236,7 @@ async function tryFallbackMethod() {
       chrome.runtime.sendMessage({
         action: "screenshotCaptured",
         dataUrl: dataUrl,
-        isFallback: true
+        hasGaps: true
       });
     }
   } catch (fallbackError) {

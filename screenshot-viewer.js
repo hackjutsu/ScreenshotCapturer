@@ -58,6 +58,12 @@ function displayScreenshot(dataUrl, hasGaps) {
     warningBanner.style.display = 'block';
   }
 
+  // Add download instruction message
+  const instructionMsg = document.getElementById('downloadInstructions');
+  if (instructionMsg) {
+    instructionMsg.style.display = 'block';
+  }
+
   // Update page title with timestamp
   const timestamp = new Date().toLocaleString();
   document.title = `Screenshot - ${timestamp}`;
