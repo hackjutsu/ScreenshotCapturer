@@ -1,3 +1,17 @@
+// Global error handler for unhandled promise rejections
+window.addEventListener('unhandledrejection', function(event) {
+  // Check if this is a message channel closed error
+  if (event.reason && event.reason.message &&
+      (event.reason.message.includes('message channel closed') ||
+       event.reason.message.includes('A listener indicated an asynchronous response') ||
+       event.reason.message.includes('The message port closed'))) {
+    // Prevent the error from being logged to the console
+    event.preventDefault();
+    // Suppress debug logs to avoid console clutter
+    // console.debug('Suppressed message channel error (expected behavior)');
+  }
+});
+
 // Variables to store screenshot data
 let screenshotDataUrl = null;
 let screenshotFilename = 'screenshot.png';
@@ -128,15 +142,36 @@ function displayScreenshot(dataUrl, hasGaps, quality, dimensions) {
 
 // Function to load blob URL from background script
 function loadBlobUrl() {
+  console.log("Attempting to load blob URL from background script");
+  showLoading('Retrieving screenshot data...');
+
   chrome.runtime.sendMessage({action: "getBlobUrl"}, function(response) {
+    // Check for runtime errors (like disconnected port)
     if (chrome.runtime.lastError) {
       console.error("Error getting blob URL:", chrome.runtime.lastError);
-      showError('Failed to get blob URL: ' + chrome.runtime.lastError.message);
+
+      // Retry if we haven't exceeded the maximum retry count
+      if (retryCount < MAX_RETRIES) {
+        retryCount++;
+        console.log(`Connection error, retrying (attempt ${retryCount} of ${MAX_RETRIES})...`);
+        showLoading(`Connection error, retrying (attempt ${retryCount} of ${MAX_RETRIES})...`);
+
+        // Wait a moment before retrying with exponential backoff
+        setTimeout(function() {
+          loadBlobUrl();
+        }, 1000 * Math.pow(2, retryCount - 1));
+        return;
+      }
+
+      showError('Failed to connect to extension: ' + chrome.runtime.lastError.message);
       return;
     }
 
-    console.log("Received response for getBlobUrl:", response);
+    console.log("Received response for getBlobUrl:", response ? "Response received" : "No response");
+
+    // Handle valid response with blob URL
     if (response && response.blobUrl) {
+      console.log("Blob URL received, length:", response.blobUrl.length);
       displayScreenshot(response.blobUrl, response.hasGaps, response.quality, {
         originalWidth: response.originalWidth,
         originalHeight: response.originalHeight,
@@ -144,12 +179,44 @@ function loadBlobUrl() {
         finalHeight: response.finalHeight,
         imageSize: response.imageSize
       });
-    } else if (response && response.error) {
+    }
+    // Handle error in response
+    else if (response && response.error) {
       console.error("Error in getBlobUrl response:", response.error);
+
+      // Retry for certain types of errors that might be transient
+      if (response.error.includes("Failed to retrieve") && retryCount < MAX_RETRIES) {
+        retryCount++;
+        console.log(`Error retrieving blob URL, retrying (attempt ${retryCount} of ${MAX_RETRIES})...`);
+        showLoading(`Error retrieving screenshot, retrying (attempt ${retryCount} of ${MAX_RETRIES})...`);
+
+        // Wait a moment before retrying with exponential backoff
+        setTimeout(function() {
+          loadBlobUrl();
+        }, 1000 * Math.pow(2, retryCount - 1));
+        return;
+      }
+
       showError('Error retrieving screenshot: ' + response.error);
-    } else {
+    }
+    // Handle empty or invalid response
+    else {
       console.error("No blob URL in response");
-      showError('No screenshot data found. The blob URL may be missing or invalid.');
+
+      // Retry if we haven't exceeded the maximum retry count
+      if (retryCount < MAX_RETRIES) {
+        retryCount++;
+        console.log(`No blob URL in response, retrying (attempt ${retryCount} of ${MAX_RETRIES})...`);
+        showLoading(`No screenshot data found, retrying (attempt ${retryCount} of ${MAX_RETRIES})...`);
+
+        // Wait a moment before retrying with exponential backoff
+        setTimeout(function() {
+          loadBlobUrl();
+        }, 1000 * Math.pow(2, retryCount - 1));
+        return;
+      }
+
+      showError('No screenshot data found. The screenshot may not have been properly saved.');
     }
   });
 }

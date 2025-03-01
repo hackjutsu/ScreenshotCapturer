@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Screenshot Extension",
-  "version": "1.0",
-  "description": "Take screenshots of visible content or full webpages",
+  "name": "Screenshot Capturer",
+  "version": "1.0.0",
+  "description": "Capture screenshots of visible content or full webpages with high quality and reliability",
+  "author": "Your Name",
   "permissions": [
     "activeTab",
     "scripting",
@@ -17,13 +18,13 @@
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
-      "128": "icons/icon48.png"
+      "128": "icons/icon128.png"
     }
   },
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
-    "128": "icons/icon48.png"
+    "128": "icons/icon128.png"
   },
   "background": {
     "service_worker": "background.js"
@@ -32,10 +33,6 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"]
-    },
-    {
-      "matches": ["*://*/screenshot-viewer.html"],
-      "js": ["screenshot-viewer.js"]
     }
   ],
   "web_accessible_resources": [
@@ -43,5 +40,6 @@
       "resources": ["screenshot-viewer.html", "screenshot-viewer.js"],
       "matches": ["<all_urls>"]
     }
-  ]
+  ],
+  "homepage_url": "https://github.com/yourusername/screenshot-capturer"
 }

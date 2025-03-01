@@ -1,3 +1,17 @@
+// Global error handler for unhandled promise rejections
+window.addEventListener('unhandledrejection', function(event) {
+  // Check if this is a message channel closed error
+  if (event.reason && event.reason.message &&
+      (event.reason.message.includes('message channel closed') ||
+       event.reason.message.includes('A listener indicated an asynchronous response') ||
+       event.reason.message.includes('The message port closed'))) {
+    // Prevent the error from being logged to the console
+    event.preventDefault();
+    // Suppress debug logs to avoid console clutter
+    // console.debug('Suppressed message channel error (expected when popup closes)');
+  }
+});
+
 document.addEventListener('DOMContentLoaded', function() {
   const captureVisibleBtn = document.getElementById('captureVisible');
   const captureFullBtn = document.getElementById('captureFull');
@@ -62,23 +76,28 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Helper function to handle screenshot capture (download and display)
   function handleScreenshotCapture(dataUrl, filename, hasGaps) {
-    // Store screenshot data in localStorage
-    const screenshotData = {
-      dataUrl: dataUrl,
-      hasGaps: hasGaps,
-      timestamp: new Date().toISOString()
-    };
+    console.log("Handling screenshot capture, data URL length:", dataUrl.length);
 
-    // Store the data in localStorage (with a size check)
+    // Check if the data URL is valid
+    if (!dataUrl || !dataUrl.startsWith('data:image/')) {
+      showError("Invalid screenshot data received");
+      return;
+    }
+
+    // Try to display the screenshot directly
     try {
-      localStorage.setItem('screenshotData', JSON.stringify(screenshotData));
-
-      // Display the screenshot in a new tab
-      displayScreenshotInNewTab();
+      displayScreenshotInNewTabWithQueryParam(dataUrl, hasGaps, false, 100, null);
     } catch (e) {
-      console.error('Error storing screenshot in localStorage:', e);
-      // If localStorage fails (e.g., due to size limits), use a different approach
-      displayScreenshotInNewTabWithQueryParam(dataUrl, hasGaps);
+      console.error('Error displaying screenshot:', e);
+      showError("Failed to display screenshot: " + e.message);
+
+      // Try the direct approach as a last resort
+      try {
+        useDirectApproach("Error in handleScreenshotCapture", dataUrl, hasGaps, false, 100, null);
+      } catch (directError) {
+        console.error("Error with direct approach:", directError);
+        showError("All screenshot display methods failed. Please try again.");
+      }
     }
   }
 
@@ -98,16 +117,11 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
-  // Helper function to display screenshot in a new tab using localStorage
-  function displayScreenshotInNewTab() {
-    // Create a new tab with the screenshot viewer
-    chrome.tabs.create({ url: 'screenshot-viewer.html' });
-  }
-
   // Alternative method using query parameters for smaller screenshots
   function displayScreenshotInNewTabWithQueryParam(dataUrl, hasGaps, scaled, quality, dimensions) {
     try {
       console.log("Processing screenshot for display, data length:", dataUrl.length);
+      showLoading("Processing screenshot...");
 
       // Check if URL.createObjectURL is available
       const hasCreateObjectURL = typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function';
@@ -122,27 +136,47 @@ document.addEventListener('DOMContentLoaded', function() {
           const blob = dataURItoBlob(dataUrl);
           console.log("Created blob, size:", blob.size);
 
-          // Store in background script first, then open the viewer
-          storeScreenshotAndOpenViewer(blob, dataUrl, hasGaps, scaled, quality, dimensions);
+          // Verify the blob is valid
+          if (blob && blob.size > 0) {
+            // Store in background script first, then open the viewer
+            storeScreenshotAndOpenViewer(blob, dataUrl, hasGaps, scaled, quality, dimensions);
+          } else {
+            console.warn("Created blob is empty or invalid, falling back to data URL");
+            storeScreenshotAndOpenViewer(null, dataUrl, hasGaps, scaled, quality, dimensions);
+          }
         } catch (blobError) {
           console.error("Error creating blob:", blobError);
+          showLoading("Falling back to alternative method...");
           // Fall back to using just the data URL
           storeScreenshotAndOpenViewer(null, dataUrl, hasGaps, scaled, quality, dimensions);
         }
       } else {
         // If URL.createObjectURL is not available, just use the data URL
         console.log("URL.createObjectURL not available, using data URL directly");
+        showLoading("Using alternative display method...");
         storeScreenshotAndOpenViewer(null, dataUrl, hasGaps, scaled, quality, dimensions);
       }
     } catch (error) {
       console.error("Error processing screenshot:", error);
       showError("Failed to process screenshot: " + error.message);
+
+      // Try a last resort direct approach
+      try {
+        console.log("Attempting direct approach after error");
+        useDirectApproach("Error processing screenshot", dataUrl, hasGaps, scaled, quality, dimensions);
+      } catch (directError) {
+        console.error("Error with direct approach:", directError);
+        showError("All screenshot display methods failed. Please try again.");
+      }
     }
   }
 
   // Function to store screenshot and open viewer
   function storeScreenshotAndOpenViewer(blob, dataUrl, hasGaps, scaled, quality, dimensions) {
     console.log("Storing screenshot in background script", blob ? `blob size: ${blob.size}` : "using data URL only");
+
+    // Show loading message
+    showLoading("Storing screenshot data...");
 
     // Create a message with all the necessary data
     const message = {
@@ -169,108 +203,95 @@ document.addEventListener('DOMContentLoaded', function() {
       };
     }
 
-    // Send the message to the background script
-    chrome.runtime.sendMessage(message, function(response) {
-      if (chrome.runtime.lastError) {
-        console.error("Error storing screenshot:", chrome.runtime.lastError);
-        showError("Failed to store screenshot data: " + chrome.runtime.lastError.message);
+    // First, send the message without expecting a response
+    // This ensures the background script processes the request even if the popup closes
+    try {
+      chrome.runtime.sendMessage(message);
+      console.log("Message sent to background script, opening viewer");
+    } catch (error) {
+      console.debug("Error sending message to background script:", error);
+      // Continue with opening the viewer even if the message fails
+    }
 
-        // Try a direct approach as a last resort
-        try {
-          console.log("Trying direct approach");
-          const timestamp = Date.now();
-          const viewerUrl = `screenshot-viewer.html?timestamp=${timestamp}`;
+    // Wait a short time to allow the background script to process
+    setTimeout(function() {
+      // Create the viewer tab with a timestamp to prevent caching issues
+      const timestamp = Date.now();
+      const viewerUrl = `screenshot-viewer.html?useBlobUrl=true&hasGaps=${hasGaps || false}&scaled=${scaled || false}&quality=${quality || 100}&timestamp=${timestamp}`;
 
-          // Store in localStorage if possible
-          try {
-            localStorage.setItem('screenshotData', JSON.stringify({
-              dataUrl: dataUrl,
-              hasGaps: hasGaps || false,
-              scaled: scaled || false,
-              quality: quality || 100,
-              timestamp: new Date().toISOString()
-            }));
-            console.log("Stored in localStorage as fallback");
-          } catch (storageError) {
-            console.error("Error storing in localStorage:", storageError);
-          }
+      console.log("Opening viewer with URL:", viewerUrl);
+      hideLoading();
 
-          chrome.tabs.create({ url: viewerUrl });
-        } catch (directError) {
-          console.error("Error with direct approach:", directError);
-          showError("All screenshot display methods failed. Please try again.");
+      chrome.tabs.create({
+        url: viewerUrl
+      }, function(tab) {
+        if (chrome.runtime.lastError) {
+          console.error("Error creating viewer tab:", chrome.runtime.lastError);
+          showError("Failed to open viewer: " + chrome.runtime.lastError.message);
+
+          // Try the direct approach as a fallback
+          useDirectApproach("Failed to create tab with blob URL", dataUrl, hasGaps, scaled, quality, dimensions);
+        } else {
+          console.log("Viewer tab created successfully, tab ID:", tab.id);
         }
+      });
+    }, 500); // Wait 500ms to give the background script time to process
+  }
 
-        return;
-      }
+  // Function to use the direct approach as a fallback
+  function useDirectApproach(reason, dataUrl, hasGaps, scaled, quality, dimensions) {
+    console.log("Using direct approach:", reason);
 
-      console.log("Received response from background script:", response);
+    try {
+      const timestamp = Date.now();
+      const viewerUrl = `screenshot-viewer.html?timestamp=${timestamp}`;
 
-      if (response && response.success) {
-        console.log("Screenshot data stored successfully, blob URL:", response.blobUrl);
+      // Store in localStorage if possible
+      try {
+        localStorage.setItem('screenshotData', JSON.stringify({
+          dataUrl: dataUrl,
+          hasGaps: hasGaps || false,
+          scaled: scaled || false,
+          quality: quality || 100,
+          dimensions: dimensions || null,
+          timestamp: new Date().toISOString()
+        }));
+        console.log("Stored in localStorage as fallback");
 
-        // Create the viewer tab with a timestamp to prevent caching issues
-        const timestamp = Date.now();
-        const viewerUrl = `screenshot-viewer.html?useBlobUrl=true&hasGaps=${hasGaps || false}&scaled=${scaled || false}&quality=${quality || 100}&timestamp=${timestamp}`;
-
-        console.log("Opening viewer with URL:", viewerUrl);
-
-        chrome.tabs.create({
-          url: viewerUrl
-        }, function(tab) {
+        // Open the viewer
+        chrome.tabs.create({ url: viewerUrl }, function(tab) {
           if (chrome.runtime.lastError) {
             console.error("Error creating viewer tab:", chrome.runtime.lastError);
             showError("Failed to open viewer: " + chrome.runtime.lastError.message);
           } else {
-            console.log("Viewer tab created successfully, tab ID:", tab.id);
+            console.log("Viewer tab created successfully with direct approach, tab ID:", tab.id);
+            hideLoading();
           }
         });
-      } else if (response && response.error) {
-        console.error("Error from background script:", response.error);
-        showError("Failed to store screenshot data: " + response.error);
-
-        // Try a direct approach as a last resort
-        try {
-          console.log("Trying direct approach after error");
-          const timestamp = Date.now();
-          const viewerUrl = `screenshot-viewer.html?timestamp=${timestamp}`;
-
-          // Store in localStorage if possible
-          try {
-            localStorage.setItem('screenshotData', JSON.stringify({
-              dataUrl: dataUrl,
-              hasGaps: hasGaps || false,
-              scaled: scaled || false,
-              quality: quality || 100,
-              timestamp: new Date().toISOString()
-            }));
-            console.log("Stored in localStorage as fallback");
-          } catch (storageError) {
-            console.error("Error storing in localStorage:", storageError);
-          }
-
-          chrome.tabs.create({ url: viewerUrl });
-        } catch (directError) {
-          console.error("Error with direct approach:", directError);
-          showError("All screenshot display methods failed. Please try again.");
-        }
-      } else {
-        console.error("Failed to store screenshot data, unexpected response:", response);
-        showError("Failed to store screenshot data: Unexpected response from background script");
+      } catch (storageError) {
+        console.error("Error storing in localStorage:", storageError);
+        showError("Failed to store screenshot: " + storageError.message);
       }
-    });
+    } catch (directError) {
+      console.error("Error with direct approach:", directError);
+      showError("All screenshot display methods failed. Please try again.");
+    }
   }
 
   // Function to keep the popup alive
   function keepPopupAlive() {
     // Send a keepAlive message every 5 seconds
     const keepAliveInterval = setInterval(function() {
-      chrome.runtime.sendMessage({action: "keepAlive"}, function(response) {
-        if (chrome.runtime.lastError) {
-          console.warn("Keep alive error:", chrome.runtime.lastError);
-          clearInterval(keepAliveInterval);
-        }
-      });
+      // Send the message without expecting a response
+      try {
+        chrome.runtime.sendMessage({action: "keepAlive"});
+        // Suppress debug logs to avoid console clutter
+        // console.debug("Keep alive message sent");
+      } catch (error) {
+        // Suppress debug logs to avoid console clutter
+        // console.debug("Error sending keep alive message:", error);
+        clearInterval(keepAliveInterval);
+      }
     }, 5000);
 
     // Clear the interval after 2 minutes
@@ -304,6 +325,23 @@ document.addEventListener('DOMContentLoaded', function() {
     if (statusDiv) {
       statusDiv.textContent = message;
       statusDiv.style.color = '#f44336';
+    }
+  }
+
+  // Helper function to show loading message
+  function showLoading(message) {
+    const statusDiv = document.getElementById('status');
+    if (statusDiv) {
+      statusDiv.textContent = message;
+      statusDiv.style.color = '#2196F3';
+    }
+  }
+
+  // Helper function to hide loading message
+  function hideLoading() {
+    const statusDiv = document.getElementById('status');
+    if (statusDiv) {
+      statusDiv.textContent = '';
     }
   }
 

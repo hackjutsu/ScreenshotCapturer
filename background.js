@@ -8,14 +8,34 @@ let dataUrlStorage = null; // Store the data URL as a fallback
 let pendingResponses = new Map();
 
 // Helper function to safely send a response
-function safeRespond(responseId, data) {
+function safeRespond(responseId, data, suppressErrorLogging = false) {
+  if (!responseId) {
+    console.debug("No responseId provided to safeRespond");
+    return;
+  }
+
   if (pendingResponses.has(responseId)) {
     try {
       const sendResponse = pendingResponses.get(responseId);
-      sendResponse(data);
-      pendingResponses.delete(responseId);
+      if (typeof sendResponse === 'function') {
+        sendResponse(data);
+        pendingResponses.delete(responseId);
+      } else {
+        console.warn("Invalid sendResponse function for responseId:", responseId);
+        pendingResponses.delete(responseId);
+      }
     } catch (error) {
-      console.error("Error sending response:", error);
+      // Only log errors if not suppressed
+      if (!suppressErrorLogging) {
+        console.error("Error sending response:", error);
+      }
+
+      // Clean up the pending response even if there was an error
+      pendingResponses.delete(responseId);
+    }
+  } else {
+    if (!suppressErrorLogging) {
+      console.debug("No pending response found for responseId:", responseId);
     }
   }
 }
@@ -28,19 +48,27 @@ console.log("Background: URL.createObjectURL available:", hasCreateObjectURL);
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   // Store the sendResponse function for later use if needed
   const responseId = Date.now() + Math.random().toString(36).substring(2, 15);
-  pendingResponses.set(responseId, sendResponse);
 
-  // Set a timeout to clean up the pending response after 30 seconds
-  setTimeout(() => {
-    if (pendingResponses.has(responseId)) {
-      pendingResponses.delete(responseId);
-    }
-  }, 30000);
+  // Only store the response function if it's provided and valid
+  if (typeof sendResponse === 'function') {
+    pendingResponses.set(responseId, sendResponse);
+
+    // Set a timeout to clean up the pending response after 30 seconds
+    setTimeout(() => {
+      if (pendingResponses.has(responseId)) {
+        pendingResponses.delete(responseId);
+      }
+    }, 30000);
+  } else {
+    console.log("No response function provided for message:", request.action);
+  }
 
   // Handle keepAlive messages to prevent popup from closing
   if (request.action === "keepAlive") {
-    safeRespond(responseId, {status: "alive"});
-    return true;
+    // For keepAlive messages, we'll suppress error logging since these errors are expected
+    // when the popup closes
+    safeRespond(responseId, {status: "alive"}, true); // true = suppress error logging
+    return true; // Keep the original behavior
   }
 
   if (request.action === "captureVisibleArea") {
@@ -94,6 +122,9 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
 
   // Store blob URL
   if (request.action === "storeBlobUrl") {
+    // Process the request even if we can't send a response
+    // This ensures the screenshot is stored even if the popup closes
+
     try {
       console.log("Background: Storing blob data", request.blob ? "Blob provided" : "No blob provided");
 
@@ -121,7 +152,14 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         };
 
         console.log("Background: Data URL stored successfully");
-        safeRespond(responseId, {success: true, blobUrl: dataUrlStorage});
+
+        // Try to send a response, but don't worry if it fails
+        try {
+          safeRespond(responseId, {success: true, blobUrl: dataUrlStorage}, true);
+        } catch (responseError) {
+          // Silently ignore response errors
+        }
+
         return true;
       }
 
@@ -175,7 +213,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
           console.log("Background: Falling back to data URL");
           blobUrl = dataUrlStorage;
         } else {
-          safeRespond(responseId, {error: "Failed to create blob URL and no data URL fallback available"});
+          safeRespond(responseId, {error: "Failed to create blob URL and no data URL fallback available"}, true);
           return true;
         }
       }
@@ -194,7 +232,13 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
       };
 
       console.log("Background: Blob URL stored successfully:", blobUrl);
-      safeRespond(responseId, {success: true, blobUrl: blobUrl});
+
+      // Try to send a response, but don't worry if it fails
+      try {
+        safeRespond(responseId, {success: true, blobUrl: blobUrl}, true);
+      } catch (responseError) {
+        // Silently ignore response errors
+      }
     } catch (error) {
       console.error("Background: Error storing blob URL:", error);
 
@@ -207,9 +251,20 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
           scaled: request.scaled || false,
           quality: request.quality || 100
         };
-        safeRespond(responseId, {success: true, blobUrl: dataUrlStorage});
+
+        // Try to send a response, but don't worry if it fails
+        try {
+          safeRespond(responseId, {success: true, blobUrl: dataUrlStorage}, true);
+        } catch (responseError) {
+          // Silently ignore response errors
+        }
       } else {
-        safeRespond(responseId, {error: "Failed to store blob: " + error.message});
+        // Try to send an error response, but don't worry if it fails
+        try {
+          safeRespond(responseId, {error: "Failed to store blob: " + error.message}, true);
+        } catch (responseError) {
+          // Silently ignore response errors
+        }
       }
     }
     return true;
@@ -229,10 +284,10 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
             hasGaps: blobUrlStorage?.hasGaps || false,
             scaled: blobUrlStorage?.scaled || false,
             quality: blobUrlStorage?.quality || 100
-          });
+          }, true); // Suppress error logging
         } else {
           console.error("Background: No data URL available");
-          safeRespond(responseId, {error: "No data URL available"});
+          safeRespond(responseId, {error: "No data URL available"}, true); // Suppress error logging
         }
         return true;
       }
@@ -240,7 +295,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
       // If we have a blob URL stored, return it
       if (blobUrlStorage && blobUrlStorage.blobUrl) {
         console.log("Background: Returning stored blob URL:", blobUrlStorage.blobUrl);
-        safeRespond(responseId, blobUrlStorage);
+        safeRespond(responseId, blobUrlStorage, true); // Suppress error logging
         return true;
       }
 
@@ -262,7 +317,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
           blobUrlStorage.blobUrl = freshBlobUrl;
 
           // Send the response
-          safeRespond(responseId, blobUrlStorage);
+          safeRespond(responseId, blobUrlStorage, true); // Suppress error logging
         } catch (urlError) {
           console.error("Background: Error creating fresh blob URL:", urlError);
 
@@ -274,9 +329,9 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
               hasGaps: blobUrlStorage?.hasGaps || false,
               scaled: blobUrlStorage?.scaled || false,
               quality: blobUrlStorage?.quality || 100
-            });
+            }, true); // Suppress error logging
           } else {
-            safeRespond(responseId, {error: "Failed to create fresh blob URL and no data URL fallback available"});
+            safeRespond(responseId, {error: "Failed to create fresh blob URL and no data URL fallback available"}, true);
           }
         }
       } else if (dataUrlStorage) {
@@ -287,10 +342,10 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
           hasGaps: blobUrlStorage?.hasGaps || false,
           scaled: blobUrlStorage?.scaled || false,
           quality: blobUrlStorage?.quality || 100
-        });
+        }, true);
       } else {
         console.error("Background: No blob or data URL available");
-        safeRespond(responseId, {error: "No screenshot data available"});
+        safeRespond(responseId, {error: "No screenshot data available"}, true);
       }
     } catch (error) {
       console.error("Background: Error retrieving blob URL:", error);
@@ -303,9 +358,9 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
           hasGaps: blobUrlStorage?.hasGaps || false,
           scaled: blobUrlStorage?.scaled || false,
           quality: blobUrlStorage?.quality || 100
-        });
+        }, true);
       } else {
-        safeRespond(responseId, {error: "Failed to retrieve blob URL: " + error.message});
+        safeRespond(responseId, {error: "Failed to retrieve blob URL: " + error.message}, true);
       }
     }
     return true;

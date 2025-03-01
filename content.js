@@ -1,3 +1,17 @@
+// Global error handler for unhandled promise rejections
+window.addEventListener('unhandledrejection', function(event) {
+  // Check if this is a message channel closed error
+  if (event.reason && event.reason.message &&
+      (event.reason.message.includes('message channel closed') ||
+       event.reason.message.includes('A listener indicated an asynchronous response') ||
+       event.reason.message.includes('The message port closed'))) {
+    // Prevent the error from being logged to the console
+    event.preventDefault();
+    // Suppress debug logs to avoid console clutter
+    // console.debug('Suppressed message channel error (expected behavior)');
+  }
+});
+
 // Store original scroll position
 let originalScrollPos = 0;
 let originalOverflowStyle = '';
@@ -109,11 +123,16 @@ async function captureFullPage() {
     const finalDataUrl = canvas.toDataURL('image/png');
 
     // Send the screenshot data to the popup
-    chrome.runtime.sendMessage({
-      action: "screenshotCaptured",
-      dataUrl: finalDataUrl,
-      hasGaps: failedSegments.length > 0
-    });
+    try {
+      chrome.runtime.sendMessage({
+        action: "screenshotCaptured",
+        dataUrl: finalDataUrl,
+        hasGaps: failedSegments.length > 0
+      });
+    } catch (error) {
+      console.debug("Error sending screenshot captured message:", error);
+      // The screenshot was still captured, but we couldn't send it
+    }
 
     // Restore original state
     document.documentElement.style.overflow = originalOverflowStyle;
@@ -208,11 +227,16 @@ async function tryFallbackMethod() {
       // If we've tried multiple times, just capture what's visible
       const dataUrl = await captureVisibleArea();
 
-      chrome.runtime.sendMessage({
-        action: "screenshotCaptured",
-        dataUrl: dataUrl,
-        hasGaps: true
-      });
+      try {
+        chrome.runtime.sendMessage({
+          action: "screenshotCaptured",
+          dataUrl: dataUrl,
+          hasGaps: true
+        });
+      } catch (error) {
+        console.debug("Error sending screenshot captured message:", error);
+        // The screenshot was still captured, but we couldn't send it
+      }
       return;
     }
 
@@ -233,11 +257,16 @@ async function tryFallbackMethod() {
       // If general failure, try with visible area only
       const dataUrl = await captureVisibleArea();
 
-      chrome.runtime.sendMessage({
-        action: "screenshotCaptured",
-        dataUrl: dataUrl,
-        hasGaps: true
-      });
+      try {
+        chrome.runtime.sendMessage({
+          action: "screenshotCaptured",
+          dataUrl: dataUrl,
+          hasGaps: true
+        });
+      } catch (error) {
+        console.debug("Error sending screenshot captured message:", error);
+        // The screenshot was still captured, but we couldn't send it
+      }
     }
   } catch (fallbackError) {
     chrome.runtime.sendMessage({
