@@ -1,0 +1,21 @@
+{
+  "name": "screenshot-extension",
+  "version": "1.0.0",
+  "description": "Chrome extension to take screenshots of visible content or full webpages",
+  "private": true,
+  "scripts": {
+    "build": "mkdir -p dist && zip -r dist/screenshot-extension.zip . -x \"*.git*\" \"node_modules/*\" \"dist/*\" \"*.DS_Store\"",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "chrome",
+    "extension",
+    "screenshot",
+    "capture"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "eslint": "^8.42.0"
+  }
+}
