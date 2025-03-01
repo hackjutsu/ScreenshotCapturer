@@ -1,25 +1,141 @@
 // Variables to store screenshot data
 let screenshotDataUrl = null;
 let screenshotFilename = 'screenshot.png';
+let retryCount = 0;
+const MAX_RETRIES = 3;
 
 // DOM elements
 const screenshotImg = document.getElementById('screenshotImg');
 const warningBanner = document.getElementById('warningBanner');
 const downloadBtn = document.getElementById('downloadBtn');
 const closeBtn = document.getElementById('closeBtn');
+const loadingMessage = document.getElementById('loadingMessage');
+const errorMessage = document.getElementById('errorMessage');
+const downloadInstructions = document.getElementById('downloadInstructions');
+
+// Function to show error message
+function showError(message) {
+  console.error("Screenshot viewer error:", message);
+  if (errorMessage) {
+    errorMessage.textContent = message;
+    errorMessage.style.display = 'block';
+  }
+  if (loadingMessage) {
+    loadingMessage.style.display = 'none';
+  }
+}
+
+// Function to show loading message
+function showLoading(message = 'Loading screenshot...') {
+  if (loadingMessage) {
+    loadingMessage.textContent = message;
+    loadingMessage.style.display = 'block';
+  }
+  if (errorMessage) {
+    errorMessage.style.display = 'none';
+  }
+}
+
+// Function to hide loading message
+function hideLoading() {
+  if (loadingMessage) {
+    loadingMessage.style.display = 'none';
+  }
+}
+
+// Function to display the screenshot
+function displayScreenshot(dataUrl, hasGaps) {
+  console.log("Displaying screenshot, data URL length:", dataUrl ? dataUrl.length : 0);
+
+  // Store the screenshot data
+  screenshotDataUrl = dataUrl;
+
+  // Create a new Image object to verify the data URL
+  const img = new Image();
+
+  img.onload = function() {
+    console.log("Screenshot image loaded successfully");
+    // Update the actual image
+    screenshotImg.src = dataUrl;
+    screenshotImg.style.display = 'block';
+    hideLoading();
+
+    // Show success message
+    downloadInstructions.style.display = 'block';
+
+    // Show warning banner if there are gaps
+    if (hasGaps) {
+      warningBanner.style.display = 'block';
+    }
+
+    // Update page title with timestamp
+    const timestamp = new Date().toLocaleString();
+    document.title = `Screenshot - ${timestamp}`;
+  };
+
+  img.onerror = function() {
+    console.error("Failed to load screenshot image");
+
+    // Try to reload the blob URL if we're using that method
+    if (retryCount < MAX_RETRIES) {
+      retryCount++;
+      console.log(`Retrying blob URL retrieval (attempt ${retryCount} of ${MAX_RETRIES})...`);
+      showLoading(`Retrying screenshot load (attempt ${retryCount} of ${MAX_RETRIES})...`);
+
+      // Wait a moment before retrying
+      setTimeout(function() {
+        loadBlobUrl();
+      }, 1000);
+    } else {
+      showError('Failed to load the screenshot image. The data may be corrupted or in an invalid format.');
+      screenshotImg.style.display = 'none';
+    }
+  };
+
+  // Set the source to trigger loading
+  img.src = dataUrl;
+}
+
+// Function to load blob URL from background script
+function loadBlobUrl() {
+  chrome.runtime.sendMessage({action: "getBlobUrl"}, function(response) {
+    if (chrome.runtime.lastError) {
+      console.error("Error getting blob URL:", chrome.runtime.lastError);
+      showError('Failed to get blob URL: ' + chrome.runtime.lastError.message);
+      return;
+    }
+
+    console.log("Received response for getBlobUrl:", response);
+    if (response && response.blobUrl) {
+      displayScreenshot(response.blobUrl, response.hasGaps);
+    } else if (response && response.error) {
+      console.error("Error in getBlobUrl response:", response.error);
+      showError('Error retrieving screenshot: ' + response.error);
+    } else {
+      console.error("No blob URL in response");
+      showError('No screenshot data found. The blob URL may be missing or invalid.');
+    }
+  });
+}
 
 // Load screenshot data when the page loads
 window.addEventListener('DOMContentLoaded', function() {
+  console.log("Screenshot viewer loaded, checking for screenshot data");
+  showLoading();
+
   // Try to get screenshot data from localStorage first
   try {
     const storedData = localStorage.getItem('screenshotData');
     if (storedData) {
+      console.log("Found screenshot data in localStorage");
       const screenshotData = JSON.parse(storedData);
       displayScreenshot(screenshotData.dataUrl, screenshotData.hasGaps);
 
       // Clear localStorage after retrieving the data
       localStorage.removeItem('screenshotData');
       return;
+    } else {
+      console.log("No screenshot data found in localStorage");
     }
   } catch (e) {
     console.error('Error retrieving screenshot from localStorage:', e);
@@ -27,52 +143,14 @@ window.addEventListener('DOMContentLoaded', function() {
 
   // If localStorage doesn't have the data, check URL parameters
   const urlParams = new URLSearchParams(window.location.search);
+  console.log("URL parameters:", Object.fromEntries(urlParams.entries()));
 
   if (urlParams.get('useBlobUrl') === 'true') {
-    // Request the blob URL from the background script
-    chrome.runtime.sendMessage({action: "getBlobUrl"}, function(response) {
-      if (response && response.blobUrl) {
-        displayScreenshot(response.blobUrl, response.hasGaps);
-      }
-    });
-  } else if (urlParams.get('useDataUrl') === 'false') {
-    // Request the data URL from the background script
-    chrome.runtime.sendMessage({action: "getScreenshot", tabId: urlParams.get('tabId')}, function(response) {
-      if (response && response.dataUrl) {
-        displayScreenshot(response.dataUrl, response.hasGaps);
-      }
-    });
-  }
-});
-
-// Function to display the screenshot
-function displayScreenshot(dataUrl, hasGaps) {
-  // Store the screenshot data
-  screenshotDataUrl = dataUrl;
-
-  // Display the screenshot
-  screenshotImg.src = dataUrl;
-
-  // Show warning banner if there are gaps in the screenshot
-  if (hasGaps) {
-    warningBanner.style.display = 'block';
-  }
-
-  // Add download instruction message
-  const instructionMsg = document.getElementById('downloadInstructions');
-  if (instructionMsg) {
-    instructionMsg.style.display = 'block';
-  }
-
-  // Update page title with timestamp
-  const timestamp = new Date().toLocaleString();
-  document.title = `Screenshot - ${timestamp}`;
-}
-
-// Listen for messages from the popup (fallback method)
-chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
-  if (request.action === "displayScreenshot") {
-    displayScreenshot(request.dataUrl, request.hasGaps);
+    console.log("Using blob URL method");
+    loadBlobUrl();
+  } else {
+    console.log("No valid method specified in URL parameters");
+    showError('No valid method specified for retrieving the screenshot.');
   }
 });
 
@@ -89,6 +167,8 @@ downloadBtn.addEventListener('click', function() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  } else {
+    showError('No screenshot data available to download.');
   }
 });
 

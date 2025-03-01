@@ -1,9 +1,43 @@
 // Storage for screenshots and blob URLs
 let screenshotStorage = {};
 let blobUrlStorage = null;
+let actualBlob = null; // Store the actual blob object to prevent garbage collection
+
+// Keep track of pending responses
+let pendingResponses = new Map();
+
+// Helper function to safely send a response
+function safeRespond(responseId, data) {
+  if (pendingResponses.has(responseId)) {
+    try {
+      const sendResponse = pendingResponses.get(responseId);
+      sendResponse(data);
+      pendingResponses.delete(responseId);
+    } catch (error) {
+      console.error("Error sending response:", error);
+    }
+  }
+}
 
 // Listen for messages from content script and popup
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+  // Store the sendResponse function for later use if needed
+  const responseId = Date.now() + Math.random().toString(36).substring(2, 15);
+  pendingResponses.set(responseId, sendResponse);
+
+  // Set a timeout to clean up the pending response after 30 seconds
+  setTimeout(() => {
+    if (pendingResponses.has(responseId)) {
+      pendingResponses.delete(responseId);
+    }
+  }, 30000);
+
+  // Handle keepAlive messages to prevent popup from closing
+  if (request.action === "keepAlive") {
+    safeRespond(responseId, {status: "alive"});
+    return true;
+  }
+
   if (request.action === "captureVisibleArea") {
     try {
       // Set capture options
@@ -15,17 +49,17 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
       chrome.tabs.captureVisibleTab(null, captureOptions, function(dataUrl) {
         if (chrome.runtime.lastError) {
           console.error("Error capturing tab:", chrome.runtime.lastError);
-          sendResponse({error: chrome.runtime.lastError.message});
+          safeRespond(responseId, {error: chrome.runtime.lastError.message});
         } else if (!dataUrl) {
           console.error("No data URL returned from captureVisibleTab");
-          sendResponse({error: "No screenshot data returned"});
+          safeRespond(responseId, {error: "No screenshot data returned"});
         } else {
-          sendResponse({dataUrl: dataUrl});
+          safeRespond(responseId, {dataUrl: dataUrl});
         }
       });
     } catch (error) {
       console.error("Exception during capture:", error);
-      sendResponse({error: error.message});
+      safeRespond(responseId, {error: error.message});
     }
     return true; // Required for async sendResponse
   }
@@ -36,7 +70,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
       dataUrl: request.dataUrl,
       hasGaps: request.hasGaps
     };
-    sendResponse({success: true});
+    safeRespond(responseId, {success: true});
     return true;
   }
 
@@ -46,9 +80,9 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     if (data) {
       // Clean up after sending
       delete screenshotStorage[request.tabId];
-      sendResponse(data);
+      safeRespond(responseId, data);
     } else {
-      sendResponse({error: "Screenshot data not found"});
+      safeRespond(responseId, {error: "Screenshot data not found"});
     }
     return true;
   }
@@ -59,7 +93,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
       blobUrl: request.blobUrl,
       hasGaps: request.hasGaps
     };
-    sendResponse({success: true});
+    safeRespond(responseId, {success: true});
     return true;
   }
 
@@ -68,9 +102,9 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     if (blobUrlStorage) {
       const data = {...blobUrlStorage};
       // Don't delete the blob URL as it might be needed again
-      sendResponse(data);
+      safeRespond(responseId, data);
     } else {
-      sendResponse({error: "Blob URL not found"});
+      safeRespond(responseId, {error: "Blob URL not found"});
     }
     return true;
   }
@@ -79,6 +113,8 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.action === "logError") {
     console.error("Content script error:", request.error);
   }
+
+  return true; // Keep the message channel open for all messages
 });
 
 // Clean up blob URLs when tabs are closed

@@ -105,48 +105,104 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   // Alternative method using query parameters for smaller screenshots
-  function displayScreenshotInNewTabWithQueryParam(dataUrl, hasGaps) {
-    // For smaller screenshots, we can use URL parameters
-    if (dataUrl.length < 2000) {
-      chrome.tabs.create({
-        url: `screenshot-viewer.html?hasGaps=${hasGaps}&useDataUrl=false`
-      }, function(tab) {
-        // Store in background script's memory
-        chrome.runtime.sendMessage({
-          action: "storeScreenshot",
-          dataUrl: dataUrl,
-          tabId: tab.id
-        });
-      });
-    } else {
-      // For larger screenshots, we'll need to use a different approach
-      // Create a blob URL
-      const blob = dataURItoBlob(dataUrl);
-      const blobUrl = URL.createObjectURL(blob);
+  function displayScreenshotInNewTabWithQueryParam(dataUrl, hasGaps, scaled, quality, dimensions) {
+    try {
+      console.log("Processing screenshot for display, data length:", dataUrl.length);
 
-      // Store the blob URL in background script's memory
-      chrome.runtime.sendMessage({
-        action: "storeBlobUrl",
-        blobUrl: blobUrl,
-        hasGaps: hasGaps
-      }, function() {
-        chrome.tabs.create({ url: 'screenshot-viewer.html?useBlobUrl=true' });
-      });
+      // Create blob from data URL
+      const blob = dataURItoBlob(dataUrl);
+      console.log("Created blob, size:", blob.size);
+
+      // Keep the popup alive while we process
+      keepPopupAlive();
+
+      // Store in background script first, then open the viewer
+      storeScreenshotAndOpenViewer(blob, dataUrl, hasGaps, scaled, quality, dimensions);
+    } catch (error) {
+      console.error("Error processing screenshot:", error);
+      showError("Failed to process screenshot: " + error.message);
     }
   }
 
-  // Helper function to convert data URI to Blob
+  // Function to store screenshot and open viewer
+  function storeScreenshotAndOpenViewer(blob, dataUrl, hasGaps, scaled, quality, dimensions) {
+    chrome.runtime.sendMessage({
+      action: "storeBlobUrl",
+      dataUrl: dataUrl,
+      blob: blob,
+      hasGaps: hasGaps,
+      scaled: scaled || false,
+      quality: quality || 100,
+      dimensions: dimensions
+    }, function(response) {
+      if (chrome.runtime.lastError) {
+        console.error("Error storing blob:", chrome.runtime.lastError);
+        showError("Failed to store screenshot data: " + chrome.runtime.lastError.message);
+        return;
+      }
+
+      if (response && response.success) {
+        console.log("Screenshot data stored successfully");
+        // Create the viewer tab
+        chrome.tabs.create({
+          url: `screenshot-viewer.html?useBlobUrl=true&hasGaps=${hasGaps}&scaled=${scaled || false}&quality=${quality || 100}&timestamp=${Date.now()}`
+        }, function(tab) {
+          if (chrome.runtime.lastError) {
+            console.error("Error creating viewer tab:", chrome.runtime.lastError);
+            showError("Failed to open viewer: " + chrome.runtime.lastError.message);
+          }
+        });
+      } else {
+        console.error("Failed to store screenshot data:", response);
+        showError("Failed to store screenshot data");
+      }
+    });
+  }
+
+  // Function to keep the popup alive
+  function keepPopupAlive() {
+    // Send a keepAlive message every 5 seconds
+    const keepAliveInterval = setInterval(function() {
+      chrome.runtime.sendMessage({action: "keepAlive"}, function(response) {
+        if (chrome.runtime.lastError) {
+          console.warn("Keep alive error:", chrome.runtime.lastError);
+          clearInterval(keepAliveInterval);
+        }
+      });
+    }, 5000);
+
+    // Clear the interval after 2 minutes
+    setTimeout(function() {
+      clearInterval(keepAliveInterval);
+    }, 120000);
+  }
+
+  // Helper function to convert data URL to Blob
   function dataURItoBlob(dataURI) {
+    // Split the data URL to get the base64 data
     const byteString = atob(dataURI.split(',')[1]);
+
+    // Get the MIME type
     const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
+
+    // Convert to byte array
     const ab = new ArrayBuffer(byteString.length);
     const ia = new Uint8Array(ab);
-
     for (let i = 0; i < byteString.length; i++) {
       ia[i] = byteString.charCodeAt(i);
     }
 
+    // Create and return Blob
     return new Blob([ab], {type: mimeString});
+  }
+
+  // Helper function to show errors
+  function showError(message) {
+    const statusDiv = document.getElementById('status');
+    if (statusDiv) {
+      statusDiv.textContent = message;
+      statusDiv.style.color = '#f44336';
+    }
   }
 
   // Listen for messages from content script
