@@ -14,6 +14,8 @@ zip -r dist/screenshot-extension.zip \
   popup.js \
   background.js \
   content.js \
+  screenshot-viewer.html \
+  screenshot-viewer.js \
   icons/ \
   -x "*.DS_Store" "*.git*"
 
