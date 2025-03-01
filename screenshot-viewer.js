@@ -12,6 +12,7 @@ const closeBtn = document.getElementById('closeBtn');
 const loadingMessage = document.getElementById('loadingMessage');
 const errorMessage = document.getElementById('errorMessage');
 const downloadInstructions = document.getElementById('downloadInstructions');
+const successMessage = document.getElementById('successMessage');
 
 // Function to show error message
 function showError(message) {
@@ -43,8 +44,19 @@ function hideLoading() {
   }
 }
 
+// Function to format file size
+function formatFileSize(bytes) {
+  if (bytes === 0) return '0 Bytes';
+
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
 // Function to display the screenshot
-function displayScreenshot(dataUrl, hasGaps) {
+function displayScreenshot(dataUrl, hasGaps, quality, dimensions) {
   console.log("Displaying screenshot, data URL length:", dataUrl ? dataUrl.length : 0);
 
   // Store the screenshot data
@@ -60,8 +72,26 @@ function displayScreenshot(dataUrl, hasGaps) {
     screenshotImg.style.display = 'block';
     hideLoading();
 
-    // Show success message
-    downloadInstructions.style.display = 'block';
+    // Calculate file size
+    let fileSize = 0;
+    if (dataUrl) {
+      // Estimate file size from data URL length
+      // For base64 encoded data, each 4 characters represent 3 bytes of data
+      const base64Data = dataUrl.split(',')[1];
+      fileSize = Math.floor((base64Data.length * 3) / 4);
+    }
+
+    // Format the file size
+    const formattedSize = formatFileSize(fileSize);
+
+    // Show success message in the header with file size
+    successMessage.textContent = `Your screenshot is ready (${formattedSize}). Click the Download button to save it to your computer.`;
+    successMessage.style.display = 'block';
+
+    // For backward compatibility
+    if (downloadInstructions) {
+      downloadInstructions.style.display = 'none';
+    }
 
     // Show warning banner if there are gaps
     if (hasGaps) {
@@ -107,7 +137,13 @@ function loadBlobUrl() {
 
     console.log("Received response for getBlobUrl:", response);
     if (response && response.blobUrl) {
-      displayScreenshot(response.blobUrl, response.hasGaps);
+      displayScreenshot(response.blobUrl, response.hasGaps, response.quality, {
+        originalWidth: response.originalWidth,
+        originalHeight: response.originalHeight,
+        finalWidth: response.finalWidth,
+        finalHeight: response.finalHeight,
+        imageSize: response.imageSize
+      });
     } else if (response && response.error) {
       console.error("Error in getBlobUrl response:", response.error);
       showError('Error retrieving screenshot: ' + response.error);
@@ -129,7 +165,12 @@ window.addEventListener('DOMContentLoaded', function() {
     if (storedData) {
       console.log("Found screenshot data in localStorage");
       const screenshotData = JSON.parse(storedData);
-      displayScreenshot(screenshotData.dataUrl, screenshotData.hasGaps);
+      displayScreenshot(
+        screenshotData.dataUrl,
+        screenshotData.hasGaps,
+        screenshotData.quality,
+        screenshotData.dimensions
+      );
 
       // Clear localStorage after retrieving the data
       localStorage.removeItem('screenshotData');

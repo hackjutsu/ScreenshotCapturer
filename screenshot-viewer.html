@@ -29,9 +29,38 @@
       margin-bottom: 20px;
     }
 
+    .header-left {
+      flex: 1;
+    }
+
+    .header-center {
+      flex: 2;
+      text-align: center;
+    }
+
+    .header-right {
+      flex: 1;
+      display: flex;
+      justify-content: flex-end;
+    }
+
     .title {
       font-size: 18px;
       font-weight: bold;
+    }
+
+    .success-message {
+      background-color: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 14px;
+      display: inline-block;
+      max-width: 100%;
+      text-align: center;
+      display: none;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
 
     .warning-banner {
@@ -99,8 +128,13 @@
 </head>
 <body>
   <div class="header">
-    <div class="title">Screenshot Viewer</div>
-    <div>
+    <div class="header-left">
+      <div class="title">Screenshot Viewer</div>
+    </div>
+    <div class="header-center">
+      <div id="successMessage" class="success-message">Your screenshot is ready. Click the Download button to save it to your computer.</div>
+    </div>
+    <div class="header-right">
       <button id="downloadBtn" class="btn btn-primary">Download</button>
       <button id="closeBtn" class="btn">Close</button>
     </div>
@@ -111,7 +145,8 @@
       Note: Some sections of the page couldn't be captured properly.
     </div>
 
-    <div id="downloadInstructions" class="info-banner">
+    <!-- Keeping this div for backward compatibility but it won't be displayed -->
+    <div id="downloadInstructions" class="info-banner" style="display: none;">
       Your screenshot is ready. Click the Download button to save it to your computer.
     </div>
 
