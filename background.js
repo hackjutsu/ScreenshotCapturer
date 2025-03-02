@@ -773,8 +773,6 @@ function restoreStickyElements(tabId) {
 
 // Function to capture full page screenshot
 async function captureFullPage(tabId, options = {}) {
-  // Track if we've hidden sticky elements so we can restore them in all cases
-  let stickyElementsHidden = false;
   let originalScrollY = 0;
 
   try {
@@ -787,7 +785,6 @@ async function captureFullPage(tabId, options = {}) {
 
     // Get page dimensions and scroll position
     const dimensions = await getPageDimensions(tabId);
-    // Save original scroll position to restore later
     originalScrollY = dimensions.scrollY;
 
     // Send progress update
@@ -799,121 +796,125 @@ async function captureFullPage(tabId, options = {}) {
 
     // Scroll to the top of the page first
     await scrollTo(tabId, 0, 0);
+    await new Promise(resolve => setTimeout(resolve, 500));
 
-    // Wait for the page to settle after scrolling
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Send progress update
+    // STEP 1: Capture the first segment with all elements visible
     chrome.runtime.sendMessage({
       action: "progressUpdate",
       progress: 20,
       message: "Capturing first segment..."
     });
 
-    // 1. Capture the first part with sticky elements visible
-    let firstCapture = await captureWithRetry(tabId, options);
+    const firstCapture = await captureWithRetry(tabId, options);
     const captures = [firstCapture];
 
-    // Send progress update
+    // STEP 2: Detect and hide sticky elements after first capture
     chrome.runtime.sendMessage({
       action: "progressUpdate",
       progress: 30,
       message: "Detecting sticky elements..."
     });
 
-    // Detect sticky elements after first capture
     const stickyElements = await detectStickyElements(tabId);
 
-    // Send progress update
     chrome.runtime.sendMessage({
       action: "progressUpdate",
       progress: 40,
       message: `Found ${stickyElements.length} sticky elements. Hiding them...`
     });
 
-    // Hide sticky elements before scrolling to capture the rest
     if (stickyElements.length > 0) {
-      stickyElementsHidden = await hideStickyElements(tabId, stickyElements);
-
-      // Give the page time to adjust layout after hiding elements
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await hideStickyElements(tabId, stickyElements);
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
 
-    // Calculate how many screenshots we need based on the page height
-    const viewportHeight = dimensions.windowHeight;
-    const pageHeight = dimensions.height;
+    // Get updated dimensions after hiding elements
+    const updatedDimensions = await getPageDimensions(tabId);
+    const viewportHeight = updatedDimensions.windowHeight;
+    const pageHeight = updatedDimensions.height;
 
-    // Use 85% of viewport height as scroll step to ensure overlap
-    const scrollStep = Math.floor(viewportHeight * 0.85);
-    const totalSteps = Math.ceil(pageHeight / scrollStep);
+    // Use a fixed capture height to ensure consistent captures
+    // Use 80% of viewport height to ensure good overlap without excessive duplication
+    const captureHeight = Math.floor(viewportHeight * 0.8);
 
-    // 2. Capture screenshots by scrolling down
-    for (let i = 1; i < totalSteps; i++) {
-      // Calculate progress percentage
-      const progressPercent = Math.floor(40 + (i / totalSteps) * 50);
+    // Calculate how many full captures we need
+    // We'll handle the last capture separately
+    const capturePositions = [];
+    let currentPosition = 0;
 
-      // Send progress update
+    // Generate all scroll positions needed for captures
+    while (currentPosition < pageHeight - viewportHeight) {
+      capturePositions.push(currentPosition);
+      currentPosition += captureHeight;
+    }
+
+    // Add the final position if it's not already included
+    // This ensures we capture the bottom of the page
+    if (capturePositions.length === 0 ||
+        capturePositions[capturePositions.length - 1] < pageHeight - viewportHeight) {
+      capturePositions.push(pageHeight - viewportHeight);
+    }
+
+    // STEP 3: Capture all segments except the first (which we already captured)
+    for (let i = 1; i < capturePositions.length; i++) {
+      const progressPercent = Math.floor(40 + (i / capturePositions.length) * 50);
+
       chrome.runtime.sendMessage({
         action: "progressUpdate",
         progress: progressPercent,
-        message: `Capturing segment ${i+1}/${totalSteps}...`
+        message: `Capturing segment ${i+1}/${capturePositions.length + 1}...`
       });
 
-      // Calculate scroll position
-      const scrollPos = i * scrollStep;
-
-      // Scroll to position
+      // Scroll to the exact position
+      const scrollPos = capturePositions[i];
       await scrollTo(tabId, 0, scrollPos);
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-      // Wait for the page to settle after scrolling
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Capture current visible area
       const capture = await captureWithRetry(tabId, options);
       captures.push(capture);
     }
 
-    // Send progress update
     chrome.runtime.sendMessage({
       action: "progressUpdate",
-      progress: 90,
-      message: "Restoring page state..."
+      progress: 95,
+      message: "Finalizing capture..."
     });
 
     // Return the array of captures for stitching
     return {
       captures: captures,
-      dimensions: dimensions
+      dimensions: updatedDimensions,
+      capturePositions: capturePositions
     };
 
   } catch (error) {
     console.error("Error capturing full page:", error);
     throw error;
   } finally {
-    console.log("Final cleanup: Restoring sticky elements in finally block");
+    console.log("Final cleanup: Restoring page state");
 
+    // Always restore sticky elements
     try {
-      // Always attempt to restore sticky elements, regardless of whether we think they were hidden
-      // This ensures we clean up even if there was an error during the hiding process
       await restoreStickyElements(tabId);
-
-      // Wait a moment to ensure restoration has time to take effect
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Make a second attempt at restoration after a delay
-      // This helps with elements that might not have been properly restored the first time
-      await restoreStickyElements(tabId);
+      console.log("Sticky elements restored");
     } catch (restoreError) {
-      console.error("Error in final restoration attempt:", restoreError);
+      console.error("Error restoring sticky elements:", restoreError);
     }
 
-    // Always try to restore the original scroll position
+    // Always restore original scroll position
     try {
       await scrollTo(tabId, 0, originalScrollY);
-      console.log("Restored original scroll position:", originalScrollY);
+      console.log("Original scroll position restored:", originalScrollY);
     } catch (scrollError) {
       console.error("Error restoring scroll position:", scrollError);
     }
+
+    // Send final progress update
+    chrome.runtime.sendMessage({
+      action: "progressUpdate",
+      progress: 100,
+      message: "Capture complete"
+    });
   }
 }
 
