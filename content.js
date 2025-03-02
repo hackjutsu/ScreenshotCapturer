@@ -19,18 +19,113 @@ let failedSegments = [];
 let captureAttempts = 0;
 const MAX_CAPTURE_ATTEMPTS = 3;
 
-// Listen for messages from popup
+// Listen for messages from popup and background
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   if (request.action === "getScrollHeight") {
     sendResponse({scrollHeight: document.documentElement.scrollHeight});
   }
 
   if (request.action === "captureFullPage") {
-    captureFullPage();
+    // Instead of calling the local captureFullPage function,
+    // forward the request to the background script
+    chrome.runtime.sendMessage(
+      {action: "captureFullPageFromBackground", tabId: chrome.devtools?.inspectedWindow?.tabId || null},
+      function(response) {
+        if (response && response.error) {
+          console.error("Error from background script:", response.error);
+        }
+      }
+    );
+    sendResponse({status: "forwarded"});
+  }
+
+  // Handle the processCaptures message from the background script
+  if (request.action === "processCaptures") {
+    processCaptures(request.captures, request.dimensions)
+      .then(result => {
+        // Send the result back to the popup
+        chrome.runtime.sendMessage({
+          action: "screenshotCaptured",
+          dataUrl: result.dataUrl,
+          hasGaps: false
+        });
+      })
+      .catch(error => {
+        console.error("Content script: Error processing captures:", error);
+        chrome.runtime.sendMessage({
+          action: "captureError",
+          error: error.message || "Error processing captures"
+        });
+      });
+    sendResponse({status: "processing"});
   }
 
   return true;
 });
+
+// Function to process captures and stitch them together
+async function processCaptures(captures, dimensions) {
+  return new Promise((resolve, reject) => {
+    try {
+      // Create a canvas to stitch the captures together
+      const canvas = document.createElement('canvas');
+      canvas.width = dimensions.width;
+      canvas.height = dimensions.height;
+      const ctx = canvas.getContext('2d');
+
+      // Counter for loaded images
+      let loadedCount = 0;
+
+      // Function to handle when all images are loaded
+      function checkAllLoaded() {
+        if (loadedCount === captures.length) {
+          try {
+            // Convert the canvas to a data URL
+            const dataUrl = canvas.toDataURL('image/png');
+            resolve({
+              dataUrl: dataUrl,
+              width: canvas.width,
+              height: canvas.height
+            });
+          } catch (e) {
+            reject(new Error("Failed to convert canvas to data URL: " + e.message));
+          }
+        }
+      }
+
+      // Load each capture into an image and draw it on the canvas
+      captures.forEach((capture, index) => {
+        const img = new Image();
+
+        img.onload = function() {
+          // Calculate position to draw on canvas
+          // For the first capture, draw at the top
+          // For subsequent captures, calculate position based on viewport height and overlap
+          const yPosition = index === 0 ? 0 : index * Math.floor(dimensions.windowHeight * 0.85);
+
+          // Draw image on canvas
+          ctx.drawImage(img, 0, yPosition);
+
+          // Increment loaded count
+          loadedCount++;
+
+          // Check if all images are loaded
+          checkAllLoaded();
+        };
+
+        img.onerror = function(e) {
+          console.error("Error loading image:", e);
+          reject(new Error("Failed to load image " + index));
+        };
+
+        // Set the source of the image to the capture data URL
+        img.src = capture;
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
 
 // Function to capture full page
 async function captureFullPage() {

@@ -2,12 +2,13 @@
   "manifest_version": 3,
   "name": "Screenshot Capturer",
   "version": "1.0.0",
-  "description": "Capture screenshots of visible content or full webpages with high quality and reliability",
+  "description": "Capture full page screenshots",
   "author": "Your Name",
   "permissions": [
     "activeTab",
     "scripting",
     "downloads",
+    "storage",
     "tabs"
   ],
   "host_permissions": [
