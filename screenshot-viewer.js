@@ -28,6 +28,10 @@ const errorMessage = document.getElementById('errorMessage');
 const downloadInstructions = document.getElementById('downloadInstructions');
 const successMessage = document.getElementById('successMessage');
 
+// Zoom state
+let isZoomedIn = false;
+let currentZoom = 1;
+
 // Function to show error message
 function showError(message) {
   console.error("Screenshot viewer error:", message);
@@ -69,6 +73,65 @@ function formatFileSize(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+// Function to fit image to height (initial state)
+function fitToHeight(imgWidth, imgHeight) {
+  // Calculate available height (window height minus header)
+  const availableHeight = window.innerHeight - 60; // 60px for header
+
+  // Calculate zoom ratio to fit height
+  const zoomRatio = availableHeight / imgHeight;
+
+  // Apply zoom
+  currentZoom = zoomRatio * 0.95; // 95% of perfect fit for a small margin
+  screenshotImg.style.transform = `scale(${currentZoom})`;
+  screenshotImg.style.transformOrigin = 'center top';
+
+  // Update cursor to indicate zoom-in is available
+  screenshotImg.style.cursor = 'zoom-in';
+
+  // Update state
+  isZoomedIn = false;
+
+  console.log("Fit to height: zoom =", currentZoom);
+}
+
+// Function to fit image to width (zoomed in state)
+function fitToWidth(imgWidth, imgHeight) {
+  // Calculate available width
+  const availableWidth = window.innerWidth;
+
+  // Calculate zoom ratio to fit width
+  const zoomRatio = availableWidth / imgWidth;
+
+  // Apply zoom
+  currentZoom = zoomRatio;
+  screenshotImg.style.transform = `scale(${currentZoom})`;
+  screenshotImg.style.transformOrigin = 'center top';
+
+  // Update cursor to indicate zoom-out is available
+  screenshotImg.style.cursor = 'zoom-out';
+
+  // Update state
+  isZoomedIn = true;
+
+  console.log("Fit to width: zoom =", currentZoom);
+}
+
+// Function to toggle zoom state
+function toggleZoom() {
+  // Get natural dimensions of the image
+  const imgWidth = screenshotImg.naturalWidth;
+  const imgHeight = screenshotImg.naturalHeight;
+
+  if (isZoomedIn) {
+    // Currently zoomed in, switch to fit by height
+    fitToHeight(imgWidth, imgHeight);
+  } else {
+    // Currently zoomed out, switch to fit by width
+    fitToWidth(imgWidth, imgHeight);
+  }
+}
+
 // Function to display the screenshot
 function displayScreenshot(dataUrl, hasGaps, quality, dimensions) {
   console.log("Displaying screenshot, data URL length:", dataUrl ? dataUrl.length : 0);
@@ -81,6 +144,8 @@ function displayScreenshot(dataUrl, hasGaps, quality, dimensions) {
 
   img.onload = function() {
     console.log("Screenshot image loaded successfully");
+    console.log("Natural dimensions:", img.naturalWidth, "x", img.naturalHeight);
+
     // Update the actual image
     screenshotImg.src = dataUrl;
     screenshotImg.style.display = 'block';
@@ -115,6 +180,12 @@ function displayScreenshot(dataUrl, hasGaps, quality, dimensions) {
     // Update page title with timestamp
     const timestamp = new Date().toLocaleString();
     document.title = `Screenshot - ${timestamp}`;
+
+    // Set initial zoom to fit by height
+    // Use a slight delay to ensure the image is fully loaded
+    setTimeout(function() {
+      fitToHeight(img.naturalWidth, img.naturalHeight);
+    }, 100);
   };
 
   img.onerror = function() {
@@ -297,26 +368,32 @@ document.addEventListener('keydown', function(event) {
     event.preventDefault();
     downloadBtn.click();
   }
+
+  // Toggle zoom on Space key
+  if (event.key === ' ' || event.code === 'Space') {
+    event.preventDefault();
+    toggleZoom();
+  }
 });
 
-// Add zoom functionality
-let currentZoom = 1;
-const zoomStep = 0.1;
-const maxZoom = 3;
-const minZoom = 0.5;
+// Add click handler to toggle zoom
+screenshotImg.addEventListener('click', function() {
+  toggleZoom();
+});
 
-// Zoom in/out with mouse wheel
-screenshotImg.addEventListener('wheel', function(event) {
-  event.preventDefault();
+// Handle window resize
+window.addEventListener('resize', function() {
+  // Only recalculate if we have a screenshot loaded
+  if (screenshotDataUrl) {
+    // Get natural dimensions of the image
+    const imgWidth = screenshotImg.naturalWidth;
+    const imgHeight = screenshotImg.naturalHeight;
 
-  if (event.deltaY < 0) {
-    // Zoom in
-    currentZoom = Math.min(currentZoom + zoomStep, maxZoom);
-  } else {
-    // Zoom out
-    currentZoom = Math.max(currentZoom - zoomStep, minZoom);
+    // Maintain current zoom state but recalculate for new window size
+    if (isZoomedIn) {
+      fitToWidth(imgWidth, imgHeight);
+    } else {
+      fitToHeight(imgWidth, imgHeight);
+    }
   }
-
-  screenshotImg.style.transform = `scale(${currentZoom})`;
-  screenshotImg.style.transformOrigin = 'top left';
 });
