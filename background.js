@@ -639,7 +639,13 @@ function detectStickyElements(tabId) {
             });
           });
 
-          return stickyElements;
+          // deduplicate stickyElements by selector
+          const deduplicatedStickyElements = stickyElements.filter((element, index, self) =>
+            index === self.findIndex((t) => t.selector === element.selector)
+          );
+          console.log("Deduplicated sticky elements:", deduplicatedStickyElements);
+
+          return deduplicatedStickyElements;
         }
       },
       (results) => {
@@ -708,15 +714,24 @@ function restoreStickyElements(tabId) {
       {
         target: {tabId: tabId},
         func: () => {
+          console.log("Restoring sticky elements");
           let restoredCount = 0;
 
+          // First approach: Use stored references
           if (window.__hiddenStickyElements && window.__hiddenStickyElements.length > 0) {
+            console.log(`Found ${window.__hiddenStickyElements.length} hidden elements to restore`);
+
             // Restore original display values
             window.__hiddenStickyElements.forEach(item => {
               if (item.element) {
                 try {
+                  console.log(`Restoring element with selector: ${item.selector}, original display: ${item.originalDisplay}`);
                   // Restore original display value
                   item.element.style.display = item.originalDisplay;
+
+                  // Force a reflow to ensure the style change takes effect
+                  void item.element.offsetHeight;
+
                   restoredCount++;
                 } catch (e) {
                   console.error("Error restoring element:", e);
@@ -726,14 +741,31 @@ function restoreStickyElements(tabId) {
 
             // Clean up
             delete window.__hiddenStickyElements;
+          } else {
+            console.log("No hidden elements found in window.__hiddenStickyElements");
           }
 
-          return restoredCount;
+          // Second approach: Remove any injected styles
+          try {
+            const injectedStyle = document.getElementById('screenshot-extension-styles');
+            if (injectedStyle) {
+              injectedStyle.parentNode.removeChild(injectedStyle);
+              console.log("Removed injected style element");
+            }
+          } catch (e) {
+            console.error("Error removing injected styles:", e);
+          }
+
+          return {
+            restored: restoredCount,
+            message: "Restoration completed"
+          };
         }
       },
       (results) => {
-        const restoredCount = results[0]?.result || 0;
-        resolve(restoredCount);
+        const result = results[0]?.result || { restored: 0, message: "No result" };
+        console.log(`Restoration result: ${result.message}, ${result.restored} elements restored`);
+        resolve(result.restored);
       }
     );
   });
@@ -747,15 +779,11 @@ async function captureFullPage(tabId, options = {}) {
 
   try {
     // Send initial progress update
-    try {
-      chrome.runtime.sendMessage({
-        action: "progressUpdate",
-        progress: 0,
-        message: "Starting capture process..."
-      });
-    } catch (err) {
-      console.log("Error sending progress update:", err);
-    }
+    chrome.runtime.sendMessage({
+      action: "progressUpdate",
+      progress: 0,
+      message: "Starting capture process..."
+    });
 
     // Get page dimensions and scroll position
     const dimensions = await getPageDimensions(tabId);
@@ -763,15 +791,11 @@ async function captureFullPage(tabId, options = {}) {
     originalScrollY = dimensions.scrollY;
 
     // Send progress update
-    try {
-      chrome.runtime.sendMessage({
-        action: "progressUpdate",
-        progress: 10,
-        message: "Preparing to capture..."
-      });
-    } catch (err) {
-      console.log("Error sending progress update:", err);
-    }
+    chrome.runtime.sendMessage({
+      action: "progressUpdate",
+      progress: 10,
+      message: "Preparing to capture..."
+    });
 
     // Scroll to the top of the page first
     await scrollTo(tabId, 0, 0);
@@ -780,44 +804,32 @@ async function captureFullPage(tabId, options = {}) {
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Send progress update
-    try {
-      chrome.runtime.sendMessage({
-        action: "progressUpdate",
-        progress: 20,
-        message: "Capturing first segment..."
-      });
-    } catch (err) {
-      console.log("Error sending progress update:", err);
-    }
+    chrome.runtime.sendMessage({
+      action: "progressUpdate",
+      progress: 20,
+      message: "Capturing first segment..."
+    });
 
     // 1. Capture the first part with sticky elements visible
     let firstCapture = await captureWithRetry(tabId, options);
     const captures = [firstCapture];
 
     // Send progress update
-    try {
-      chrome.runtime.sendMessage({
-        action: "progressUpdate",
-        progress: 30,
-        message: "Detecting sticky elements..."
-      });
-    } catch (err) {
-      console.log("Error sending progress update:", err);
-    }
+    chrome.runtime.sendMessage({
+      action: "progressUpdate",
+      progress: 30,
+      message: "Detecting sticky elements..."
+    });
 
     // Detect sticky elements after first capture
     const stickyElements = await detectStickyElements(tabId);
 
     // Send progress update
-    try {
-      chrome.runtime.sendMessage({
-        action: "progressUpdate",
-        progress: 40,
-        message: `Found ${stickyElements.length} sticky elements. Hiding them...`
-      });
-    } catch (err) {
-      console.log("Error sending progress update:", err);
-    }
+    chrome.runtime.sendMessage({
+      action: "progressUpdate",
+      progress: 40,
+      message: `Found ${stickyElements.length} sticky elements. Hiding them...`
+    });
 
     // Hide sticky elements before scrolling to capture the rest
     if (stickyElements.length > 0) {
@@ -841,15 +853,11 @@ async function captureFullPage(tabId, options = {}) {
       const progressPercent = Math.floor(40 + (i / totalSteps) * 50);
 
       // Send progress update
-      try {
-        chrome.runtime.sendMessage({
-          action: "progressUpdate",
-          progress: progressPercent,
-          message: `Capturing segment ${i+1}/${totalSteps}...`
-        });
-      } catch (err) {
-        console.log("Error sending progress update:", err);
-      }
+      chrome.runtime.sendMessage({
+        action: "progressUpdate",
+        progress: progressPercent,
+        message: `Capturing segment ${i+1}/${totalSteps}...`
+      });
 
       // Calculate scroll position
       const scrollPos = i * scrollStep;
@@ -860,46 +868,17 @@ async function captureFullPage(tabId, options = {}) {
       // Wait for the page to settle after scrolling
       await new Promise(resolve => setTimeout(resolve, 1000));
 
-      try {
-        // Capture current visible area
-        const capture = await captureWithRetry(tabId, options);
-        captures.push(capture);
-      } catch (captureError) {
-        console.error(`Failed to capture segment ${i+1}:`, captureError);
-        // Continue with the next segment
-      }
+      // Capture current visible area
+      const capture = await captureWithRetry(tabId, options);
+      captures.push(capture);
     }
 
     // Send progress update
-    try {
-      chrome.runtime.sendMessage({
-        action: "progressUpdate",
-        progress: 90,
-        message: "Restoring page state..."
-      });
-    } catch (err) {
-      console.log("Error sending progress update:", err);
-    }
-
-    // 3. Restore sticky elements after capturing is complete
-    if (stickyElementsHidden) {
-      await restoreStickyElements(tabId);
-      stickyElementsHidden = false;
-    }
-
-    // Restore original scroll position
-    await scrollTo(tabId, 0, originalScrollY);
-
-    // Send progress update
-    try {
-      chrome.runtime.sendMessage({
-        action: "progressUpdate",
-        progress: 95,
-        message: "Processing captures..."
-      });
-    } catch (err) {
-      console.log("Error sending progress update:", err);
-    }
+    chrome.runtime.sendMessage({
+      action: "progressUpdate",
+      progress: 90,
+      message: "Restoring page state..."
+    });
 
     // Return the array of captures for stitching
     return {
@@ -909,22 +888,32 @@ async function captureFullPage(tabId, options = {}) {
 
   } catch (error) {
     console.error("Error capturing full page:", error);
+    throw error;
+  } finally {
+    console.log("Final cleanup: Restoring sticky elements in finally block");
 
-    // Ensure we restore the page state even if there was an error
     try {
-      // Restore sticky elements if they were hidden
-      if (stickyElementsHidden) {
-        await restoreStickyElements(tabId);
-        stickyElementsHidden = false;
-      }
+      // Always attempt to restore sticky elements, regardless of whether we think they were hidden
+      // This ensures we clean up even if there was an error during the hiding process
+      await restoreStickyElements(tabId);
 
-      // Restore original scroll position
-      await scrollTo(tabId, 0, originalScrollY);
+      // Wait a moment to ensure restoration has time to take effect
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Make a second attempt at restoration after a delay
+      // This helps with elements that might not have been properly restored the first time
+      await restoreStickyElements(tabId);
     } catch (restoreError) {
-      console.error("Error restoring page state:", restoreError);
+      console.error("Error in final restoration attempt:", restoreError);
     }
 
-    throw error;
+    // Always try to restore the original scroll position
+    try {
+      await scrollTo(tabId, 0, originalScrollY);
+      console.log("Restored original scroll position:", originalScrollY);
+    } catch (scrollError) {
+      console.error("Error restoring scroll position:", scrollError);
+    }
   }
 }
 
