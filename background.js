@@ -433,16 +433,6 @@ function detectStickyElements(tabId) {
           // Array to store detected sticky elements
           const stickyElements = [];
 
-          // Debug info to track what's happening
-          const debugInfo = {
-            hostname: window.location.hostname,
-            positionedElementsFound: 0,
-            headerElementsFound: 0,
-            sidebarElementsFound: 0,
-            siteSpecificElementsFound: 0,
-            finalElementsAfterFiltering: 0
-          };
-
           // Helper function to check if an element is visible
           function isVisible(element) {
             if (!element) return false;
@@ -520,58 +510,6 @@ function detectStickyElements(tabId) {
             return path.join(' > ');
           }
 
-          // Helper function to get detailed element info for logging
-          function getElementDetails(element, source) {
-            const rect = element.getBoundingClientRect();
-            const style = window.getComputedStyle(element);
-
-            // Get computed styles that might affect stickiness
-            const position = style.position;
-            const zIndex = style.zIndex;
-            const top = style.top;
-            const left = style.left;
-            const right = style.right;
-            const bottom = style.bottom;
-            const display = style.display;
-            const visibility = style.visibility;
-            const opacity = style.opacity;
-
-            // Get element attributes
-            const attributes = {};
-            for (let i = 0; i < element.attributes.length; i++) {
-              const attr = element.attributes[i];
-              attributes[attr.name] = attr.value;
-            }
-
-            return {
-              tagName: element.tagName,
-              id: element.id || null,
-              className: element.className || null,
-              textContent: element.textContent ? element.textContent.substring(0, 50) + (element.textContent.length > 50 ? '...' : '') : null,
-              attributes: attributes,
-              rect: {
-                top: rect.top,
-                left: rect.left,
-                width: rect.width,
-                height: rect.height,
-                bottom: rect.bottom,
-                right: rect.right
-              },
-              style: {
-                position,
-                zIndex,
-                top,
-                left,
-                right,
-                bottom,
-                display,
-                visibility,
-                opacity
-              },
-              source: source
-            };
-          }
-
           // 1. Check elements with fixed or sticky positioning
           const positionedElements = [];
 
@@ -592,10 +530,6 @@ function detectStickyElements(tabId) {
                   style: style,
                   source: 'positioned'
                 });
-                debugInfo.positionedElementsFound++;
-
-                // Log detailed info about this element
-                console.log("Found positioned element:", getElementDetails(element, 'positioned'));
               }
             }
           });
@@ -626,10 +560,6 @@ function detectStickyElements(tabId) {
                     style: style,
                     source: 'header'
                   });
-                  debugInfo.headerElementsFound++;
-
-                  // Log detailed info about this element
-                  console.log("Found header element:", getElementDetails(element, 'header'));
                 }
               });
             } catch (e) {
@@ -664,7 +594,6 @@ function detectStickyElements(tabId) {
                     style: style,
                     source: 'sidebar'
                   });
-                  debugInfo.sidebarElementsFound++;
                 }
               });
             } catch (e) {
@@ -672,9 +601,7 @@ function detectStickyElements(tabId) {
             }
           });
 
-          // 4. Site-specific detection
-
-          // 5. Process the collected elements
+          // Process the collected elements
           // Remove duplicates (elements that contain other elements)
           const filteredElements = [];
 
@@ -695,15 +622,9 @@ function detectStickyElements(tabId) {
             }
           });
 
-          debugInfo.finalElementsAfterFiltering = filteredElements.length;
-
           // Convert to the final format with selectors
           filteredElements.forEach(item => {
             const selector = generateSelector(item.element);
-
-            // Log detailed info about each element for debugging
-            const details = getElementDetails(item.element, item.source);
-
             stickyElements.push({
               selector: selector,
               position: item.style.position,
@@ -714,20 +635,16 @@ function detectStickyElements(tabId) {
               isHeader: item.rect.top < 100 && item.rect.width > window.innerWidth / 2,
               isSidebar: (item.rect.left < 300 || item.rect.right > window.innerWidth - 300) &&
                          item.rect.height > 200,
-              source: item.source,
-              details: details
+              source: item.source
             });
           });
 
-          return {
-            elements: stickyElements,
-            debugInfo: debugInfo
-          };
+          return stickyElements;
         }
       },
       (results) => {
-        const result = results[0]?.result || { elements: [], debugInfo: {} };
-        resolve(result.elements);
+        const elements = results[0]?.result || [];
+        resolve(elements);
       }
     );
   });
@@ -737,7 +654,7 @@ function detectStickyElements(tabId) {
 function hideStickyElements(tabId, stickyElements) {
   return new Promise((resolve) => {
     if (!stickyElements || stickyElements.length === 0) {
-      resolve();
+      resolve(false);
       return;
     }
 
@@ -748,166 +665,37 @@ function hideStickyElements(tabId, stickyElements) {
         target: {tabId: tabId},
         args: [selectors],
         func: (selectors) => {
-          const hiddenElements = [];
-          const debugInfo = {
-            totalSelectors: selectors.length,
-            elementsFound: 0,
-            elementsHidden: 0,
-            notFoundSelectors: []
-          };
+          // Store hidden elements for later restoration
+          window.__hiddenStickyElements = [];
 
           selectors.forEach(selector => {
             try {
               const element = document.querySelector(selector);
               if (element) {
-                debugInfo.elementsFound++;
+                // Store original display value
+                const originalDisplay = window.getComputedStyle(element).display;
 
-                if (element.style.display !== 'none') {
-                  // Store original display value
-                  const originalDisplay = element.style.display || '';
+                // Hide the element
+                element.style.display = 'none';
 
-                  // Hide the element
-                  element.style.display = 'none';
-
-                  // Verify the element was actually hidden
-                  const computedStyle = window.getComputedStyle(element);
-                  const wasHidden = computedStyle.display === 'none';
-
-                  hiddenElements.push({
-                    element: element,
-                    originalDisplay: originalDisplay,
-                    selector: selector,
-                    wasHidden: wasHidden
-                  });
-
-                  if (wasHidden) {
-                    debugInfo.elementsHidden++;
-                  } else {
-                    console.warn("Failed to hide element with selector:", selector);
-                  }
-                } else {
-                }
-              } else {
-                console.warn("Element not found with selector:", selector);
-                debugInfo.notFoundSelectors.push(selector);
+                // Store reference for restoration
+                window.__hiddenStickyElements.push({
+                  element: element,
+                  originalDisplay: originalDisplay,
+                  selector: selector
+                });
               }
             } catch (e) {
               console.error("Error hiding element:", selector, e);
             }
           });
 
-          // Try a more aggressive approach for Anthropic's site
-          if (window.location.hostname.includes('anthropic.com')) {
-            // Force hide the top navigation bar
-            const topElements = document.querySelectorAll('body > header, body > nav, header:first-child, nav:first-child');
-            topElements.forEach(element => {
-              if (element && element.style.display !== 'none') {
-                // Skip if we already hid this element
-                if (hiddenElements.some(item => item.element === element)) {                  return;
-                }
-
-                const originalDisplay = element.style.display || '';
-                element.style.display = 'none';
-
-                const computedStyle = window.getComputedStyle(element);
-                const wasHidden = computedStyle.display === 'none';
-
-                hiddenElements.push({
-                  element: element,
-                  originalDisplay: originalDisplay,
-                  selector: element.tagName + (element.id ? '#' + element.id : ''),
-                  wasHidden: wasHidden
-                });
-
-                if (wasHidden) {
-                  debugInfo.elementsHidden++;
-                }
-              }
-            });
-
-            // Try hiding by inline style override (more aggressive)
-            const possibleHeaders = document.querySelectorAll('header, nav, [class*="header"], [class*="nav"]');
-
-            possibleHeaders.forEach(element => {
-              if (element &&
-                  element.getBoundingClientRect().top < 100 &&
-                  element.style.display !== 'none') {
-
-                // Skip if we already hid this element
-                if (hiddenElements.some(item => item.element === element)) {
-                  return;
-                }
-
-                const originalDisplay = element.style.display || '';
-
-                // More aggressive approach - use !important
-                const originalStyle = element.getAttribute('style') || '';
-                element.setAttribute('style', originalStyle + '; display: none !important;');
-
-                const computedStyle = window.getComputedStyle(element);
-                const wasHidden = computedStyle.display === 'none';
-
-                hiddenElements.push({
-                  element: element,
-                  originalDisplay: originalDisplay,
-                  originalStyle: originalStyle,
-                  selector: element.tagName + (element.id ? '#' + element.id : ''),
-                  wasHidden: wasHidden,
-                  aggressive: true
-                });
-
-                if (wasHidden) {
-                  debugInfo.elementsHidden++;
-                }
-              }
-            });
-
-            // Try the most aggressive approach - CSS injection
-            try {
-              const style = document.createElement('style');
-              style.id = 'sticky-element-hider';
-              style.textContent =
-                "header, nav, [class*=\"header\"], [class*=\"nav\"], [class*=\"menu\"], [role=\"banner\"], [role=\"navigation\"] {" +
-                "  display: none !important;" +
-                "  visibility: hidden !important;" +
-                "  opacity: 0 !important;" +
-                "  pointer-events: none !important;" +
-                "}" +
-                "body > header, body > nav, div > header:first-child, div > nav:first-child {" +
-                "  display: none !important;" +
-                "  visibility: hidden !important;" +
-                "}" +
-                "/* Target elements at the top of the page */" +
-                "body > div:first-child > header," +
-                "body > div:first-child > nav," +
-                "body > div:first-child > div > header," +
-                "body > div:first-child > div > nav {" +
-                "  display: none !important;" +
-                "  visibility: hidden !important;" +
-                "}";
-
-              // Store reference to the style element for later removal
-              window.__injectedStyle = style;
-
-              // Add the style to the document
-              document.head.appendChild(style);
-            } catch (e) {
-              console.error("Error injecting CSS:", e);
-            }
-          }
-
-          // Store references to hidden elements in a global variable
-          window.__hiddenStickyElements = hiddenElements;
-
-          return {
-            count: hiddenElements.length,
-            debugInfo: debugInfo
-          };
+          return window.__hiddenStickyElements.length;
         }
       },
       (results) => {
-        const result = results[0]?.result || { count: 0, debugInfo: {} };
-        resolve();
+        const hiddenCount = results[0]?.result || 0;
+        resolve(hiddenCount > 0);
       }
     );
   });
@@ -920,121 +708,223 @@ function restoreStickyElements(tabId) {
       {
         target: {tabId: tabId},
         func: () => {
-          if (!window.__hiddenStickyElements) return 0;
+          let restoredCount = 0;
 
-          const count = window.__hiddenStickyElements.length;
-          const debugInfo = {
-            totalElements: count,
-            elementsRestored: 0,
-            failedRestores: 0
-          };
-
-          // Restore original display values
-          window.__hiddenStickyElements.forEach(item => {
-            if (item.element) {
-              try {
-                if (item.aggressive) {
-                  // Restore original style attribute
-                  item.element.setAttribute('style', item.originalStyle || '');
-                } else {
+          if (window.__hiddenStickyElements && window.__hiddenStickyElements.length > 0) {
+            // Restore original display values
+            window.__hiddenStickyElements.forEach(item => {
+              if (item.element) {
+                try {
                   // Restore original display value
                   item.element.style.display = item.originalDisplay;
+                  restoredCount++;
+                } catch (e) {
+                  console.error("Error restoring element:", e);
                 }
-
-                debugInfo.elementsRestored++;
-              } catch (e) {
-                debugInfo.failedRestores++;
-                console.error("Error restoring element:", e);
               }
-            }
-          });
+            });
 
-          // Remove injected CSS if it exists
-          if (window.__injectedStyle && window.__injectedStyle.parentNode) {
-            try {
-              window.__injectedStyle.parentNode.removeChild(window.__injectedStyle);
-            } catch (e) {
-              console.error("Error removing injected CSS:", e);
-            }
+            // Clean up
+            delete window.__hiddenStickyElements;
           }
 
-          // Clean up
-          delete window.__hiddenStickyElements;
-          delete window.__injectedStyle;
-
-          return {
-            count: count,
-            debugInfo: debugInfo
-          };
+          return restoredCount;
         }
       },
       (results) => {
-        const result = results[0]?.result || { count: 0, debugInfo: {} };
-        resolve();
+        const restoredCount = results[0]?.result || 0;
+        resolve(restoredCount);
       }
     );
   });
 }
 
-// Function to capture visible tab as a promise with retry
-function captureVisibleTabPromise(tabId, options = {}) {
-  // Create a new options object without the quality parameter
-  const captureOptions = { format: 'png' };
+// Function to capture full page screenshot
+async function captureFullPage(tabId, options = {}) {
+  // Track if we've hidden sticky elements so we can restore them in all cases
+  let stickyElementsHidden = false;
+  let originalScrollY = 0;
 
-  // Only add quality if it's for jpeg format
-  if (options.format === 'jpeg') {
-    // Ensure quality is an integer between 0-100
-    captureOptions.quality = options.quality ? Math.min(Math.max(Math.round(options.quality), 0), 100) : 100;
-  }
-
-  // Add any other options
-  Object.keys(options).forEach(key => {
-    if (key !== 'quality' || options.format === 'jpeg') {
-      captureOptions[key] = options[key];
-    }
-  });
-
-  return new Promise((resolve, reject) => {
-    chrome.tabs.captureVisibleTab(
-      null,
-      captureOptions,
-      (dataUrl) => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError);
-        } else {
-          resolve(dataUrl);
-        }
-      }
-    );
-  });
-}
-
-// Helper function to capture with retry and backoff
-async function captureWithRetry(tabId, options = {}, maxRetries = 3, initialDelay = 1000) {
-  let retries = 0;
-  let delay = initialDelay;
-
-  while (retries <= maxRetries) {
+  try {
+    // Send initial progress update
     try {
-      // If not the first attempt, wait before trying again
-      if (retries > 0) {
-        await new Promise(resolve => setTimeout(resolve, delay));
-        // Exponential backoff
-        delay *= 2;
-      }
-
-      return await captureVisibleTabPromise(tabId, options);
-    } catch (error) {
-      retries++;
-      console.error(`Capture attempt ${retries} failed:`, error);
-
-      // If we've exhausted all retries or it's not a rate limit error, throw
-      if (retries > maxRetries || !error.message || !error.message.includes('MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND')) {
-        throw error;
-      }
-
-      // Otherwise, we'll retry after the delay
+      chrome.runtime.sendMessage({
+        action: "progressUpdate",
+        progress: 0,
+        message: "Starting capture process..."
+      });
+    } catch (err) {
+      console.log("Error sending progress update:", err);
     }
+
+    // Get page dimensions and scroll position
+    const dimensions = await getPageDimensions(tabId);
+    // Save original scroll position to restore later
+    originalScrollY = dimensions.scrollY;
+
+    // Send progress update
+    try {
+      chrome.runtime.sendMessage({
+        action: "progressUpdate",
+        progress: 10,
+        message: "Preparing to capture..."
+      });
+    } catch (err) {
+      console.log("Error sending progress update:", err);
+    }
+
+    // Scroll to the top of the page first
+    await scrollTo(tabId, 0, 0);
+
+    // Wait for the page to settle after scrolling
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Send progress update
+    try {
+      chrome.runtime.sendMessage({
+        action: "progressUpdate",
+        progress: 20,
+        message: "Capturing first segment..."
+      });
+    } catch (err) {
+      console.log("Error sending progress update:", err);
+    }
+
+    // 1. Capture the first part with sticky elements visible
+    let firstCapture = await captureWithRetry(tabId, options);
+    const captures = [firstCapture];
+
+    // Send progress update
+    try {
+      chrome.runtime.sendMessage({
+        action: "progressUpdate",
+        progress: 30,
+        message: "Detecting sticky elements..."
+      });
+    } catch (err) {
+      console.log("Error sending progress update:", err);
+    }
+
+    // Detect sticky elements after first capture
+    const stickyElements = await detectStickyElements(tabId);
+
+    // Send progress update
+    try {
+      chrome.runtime.sendMessage({
+        action: "progressUpdate",
+        progress: 40,
+        message: `Found ${stickyElements.length} sticky elements. Hiding them...`
+      });
+    } catch (err) {
+      console.log("Error sending progress update:", err);
+    }
+
+    // Hide sticky elements before scrolling to capture the rest
+    if (stickyElements.length > 0) {
+      stickyElementsHidden = await hideStickyElements(tabId, stickyElements);
+
+      // Give the page time to adjust layout after hiding elements
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    // Calculate how many screenshots we need based on the page height
+    const viewportHeight = dimensions.windowHeight;
+    const pageHeight = dimensions.height;
+
+    // Use 85% of viewport height as scroll step to ensure overlap
+    const scrollStep = Math.floor(viewportHeight * 0.85);
+    const totalSteps = Math.ceil(pageHeight / scrollStep);
+
+    // 2. Capture screenshots by scrolling down
+    for (let i = 1; i < totalSteps; i++) {
+      // Calculate progress percentage
+      const progressPercent = Math.floor(40 + (i / totalSteps) * 50);
+
+      // Send progress update
+      try {
+        chrome.runtime.sendMessage({
+          action: "progressUpdate",
+          progress: progressPercent,
+          message: `Capturing segment ${i+1}/${totalSteps}...`
+        });
+      } catch (err) {
+        console.log("Error sending progress update:", err);
+      }
+
+      // Calculate scroll position
+      const scrollPos = i * scrollStep;
+
+      // Scroll to position
+      await scrollTo(tabId, 0, scrollPos);
+
+      // Wait for the page to settle after scrolling
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      try {
+        // Capture current visible area
+        const capture = await captureWithRetry(tabId, options);
+        captures.push(capture);
+      } catch (captureError) {
+        console.error(`Failed to capture segment ${i+1}:`, captureError);
+        // Continue with the next segment
+      }
+    }
+
+    // Send progress update
+    try {
+      chrome.runtime.sendMessage({
+        action: "progressUpdate",
+        progress: 90,
+        message: "Restoring page state..."
+      });
+    } catch (err) {
+      console.log("Error sending progress update:", err);
+    }
+
+    // 3. Restore sticky elements after capturing is complete
+    if (stickyElementsHidden) {
+      await restoreStickyElements(tabId);
+      stickyElementsHidden = false;
+    }
+
+    // Restore original scroll position
+    await scrollTo(tabId, 0, originalScrollY);
+
+    // Send progress update
+    try {
+      chrome.runtime.sendMessage({
+        action: "progressUpdate",
+        progress: 95,
+        message: "Processing captures..."
+      });
+    } catch (err) {
+      console.log("Error sending progress update:", err);
+    }
+
+    // Return the array of captures for stitching
+    return {
+      captures: captures,
+      dimensions: dimensions
+    };
+
+  } catch (error) {
+    console.error("Error capturing full page:", error);
+
+    // Ensure we restore the page state even if there was an error
+    try {
+      // Restore sticky elements if they were hidden
+      if (stickyElementsHidden) {
+        await restoreStickyElements(tabId);
+        stickyElementsHidden = false;
+      }
+
+      // Restore original scroll position
+      await scrollTo(tabId, 0, originalScrollY);
+    } catch (restoreError) {
+      console.error("Error restoring page state:", restoreError);
+    }
+
+    throw error;
   }
 }
 
@@ -1090,205 +980,64 @@ function scrollTo(tabId, x, y) {
   });
 }
 
-// Function to capture full page screenshot
-async function captureFullPage(tabId, options = {}) {
-  try {
-    // Send initial progress update
-    chrome.runtime.sendMessage({
-      action: "progressUpdate",
-      progress: 0,
-      message: "Starting capture process..."
-    });
+// Helper function to capture with retry and backoff
+async function captureWithRetry(tabId, options = {}, maxRetries = 3, initialDelay = 1000) {
+  let retries = 0;
+  let delay = initialDelay;
 
-    // Get page dimensions and scroll position
-    const dimensions = await getPageDimensions(tabId);
-    // Save original scroll position to restore later
-    const originalScrollY = dimensions.scrollY;
-
-    // Get the hostname to identify the website
-    const hostname = await chrome.scripting.executeScript({
-      target: {tabId: tabId},
-      func: () => window.location.hostname
-    }).then(results => results[0].result);
-
-    // Send progress update
-    chrome.runtime.sendMessage({
-      action: "progressUpdate",
-      progress: 10,
-      message: "Detecting sticky elements..."
-    });
-
-    // Detect sticky elements before starting
-    const stickyElements = await detectStickyElements(tabId);
-    // Send progress update
-    chrome.runtime.sendMessage({
-      action: "progressUpdate",
-      progress: 20,
-      message: `Found ${stickyElements.length} sticky elements`
-    });
-
-    // Scroll to the top of the page
-    await scrollTo(tabId, 0, 0);
-
-    // Wait for the page to settle after scrolling
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Send progress update
-    chrome.runtime.sendMessage({
-      action: "progressUpdate",
-      progress: 30,
-      message: "Capturing first segment..."
-    });
-
-    // Capture the first part with sticky elements visible
-    let firstCapture = await captureWithRetry(tabId, options);
-    const captures = [firstCapture];
-    // Send progress update
-    chrome.runtime.sendMessage({
-      action: "progressUpdate",
-      progress: 40,
-      message: "Hiding sticky elements..."
-    });
-
-    // Hide sticky elements before scrolling to capture the rest
-    if (stickyElements.length > 0) {
-      await hideStickyElements(tabId, stickyElements);
-      // Give the page time to adjust layout after hiding elements
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Verify elements are hidden
-      await chrome.scripting.executeScript({
-        target: {tabId: tabId},
-        func: () => {
-          if (!window.__hiddenStickyElements) return "No hidden elements tracked";
-
-          const stillHidden = window.__hiddenStickyElements.filter(item => {
-            if (!item.element) return false;
-            const style = window.getComputedStyle(item.element);
-            return style.display === 'none';
-          });
-
-          return {
-            total: window.__hiddenStickyElements.length,
-            hidden: stillHidden.length,
-            notHidden: window.__hiddenStickyElements.length - stillHidden.length
-          };
-        }
-      }).then(results => {
-      });
-    }
-
-    // Calculate how many screenshots we need based on the page height
-    const viewportHeight = dimensions.windowHeight;
-    const pageHeight = dimensions.height;
-
-    // Use 85% of viewport height as scroll step to ensure overlap
-    const scrollStep = Math.floor(viewportHeight * 0.85);
-    const totalSteps = Math.ceil(pageHeight / scrollStep);
-
-    // Capture screenshots by scrolling down
-    for (let i = 1; i < totalSteps; i++) {
-      // Calculate progress percentage
-      const progressPercent = Math.floor(40 + (i / totalSteps) * 50);
-
-      // Send progress update
-      chrome.runtime.sendMessage({
-        action: "progressUpdate",
-        progress: progressPercent,
-        message: `Capturing segment ${i+1}/${totalSteps}...`
-      });
-
-      // Calculate scroll position
-      const scrollPos = i * scrollStep;
-
-      // Scroll to position
-      await scrollTo(tabId, 0, scrollPos);
-
-      // Wait for the page to settle after scrolling - increased delay to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Re-hide sticky elements on every segment to ensure they stay hidden
-      if (stickyElements.length > 0) {
-        await hideStickyElements(tabId, stickyElements);
-
-        // Additional wait after re-hiding elements
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // Verify elements are still hidden
-        await chrome.scripting.executeScript({
-          target: {tabId: tabId},
-          func: () => {
-            if (!window.__hiddenStickyElements) return "No hidden elements tracked";
-
-            const stillHidden = window.__hiddenStickyElements.filter(item => {
-              if (!item.element) return false;
-              const style = window.getComputedStyle(item.element);
-              return style.display === 'none';
-            });
-
-            return {
-              total: window.__hiddenStickyElements.length,
-              hidden: stillHidden.length,
-              notHidden: window.__hiddenStickyElements.length - stillHidden.length
-            };
-          }
-        }).then(results => {
-        });
+  while (retries <= maxRetries) {
+    try {
+      // If not the first attempt, wait before trying again
+      if (retries > 0) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+        // Exponential backoff
+        delay *= 2;
       }
 
-      // Add a delay before capturing to avoid hitting the rate limit
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      return await captureVisibleTabPromise(tabId, options);
+    } catch (error) {
+      retries++;
+      console.error(`Capture attempt ${retries} failed:`, error);
 
-      try {
-        // Capture current visible area with retry mechanism
-        const capture = await captureWithRetry(tabId, options);
-        captures.push(capture);
-        // Add a delay after capturing to avoid hitting the rate limit
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      } catch (captureError) {
-        console.error(`Failed to capture segment ${i+1} after multiple retries:`, captureError);
-        // Continue with the next segment
+      // If we've exhausted all retries or it's not a rate limit error, throw
+      if (retries > maxRetries || !error.message || !error.message.includes('MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND')) {
+        throw error;
       }
+
+      // Otherwise, we'll retry after the delay
     }
-
-    // Send progress update
-    chrome.runtime.sendMessage({
-      action: "progressUpdate",
-      progress: 90,
-      message: "Restoring page state..."
-    });
-
-    // Restore sticky elements after capturing is complete
-    if (stickyElements.length > 0) {
-      await restoreStickyElements(tabId);
-    }
-
-    // Restore original scroll position
-    await scrollTo(tabId, 0, originalScrollY);
-
-    // Send progress update
-    chrome.runtime.sendMessage({
-      action: "progressUpdate",
-      progress: 95,
-      message: "Processing captures..."
-    });
-
-    // Return the array of captures for stitching
-    return {
-      captures: captures,
-      dimensions: dimensions
-    };
-
-  } catch (error) {
-    console.error("Error capturing full page:", error);
-
-    // Send error progress update
-    chrome.runtime.sendMessage({
-      action: "progressUpdate",
-      progress: 100,
-      message: "Error: " + error.message
-    });
-
-    throw error;
   }
+}
+
+// Function to capture visible tab as a promise with retry
+function captureVisibleTabPromise(tabId, options = {}) {
+  // Create a new options object without the quality parameter
+  const captureOptions = { format: 'png' };
+
+  // Only add quality if it's for jpeg format
+  if (options.format === 'jpeg') {
+    // Ensure quality is an integer between 0-100
+    captureOptions.quality = options.quality ? Math.min(Math.max(Math.round(options.quality), 0), 100) : 100;
+  }
+
+  // Add any other options
+  Object.keys(options).forEach(key => {
+    if (key !== 'quality' || options.format === 'jpeg') {
+      captureOptions[key] = options[key];
+    }
+  });
+
+  return new Promise((resolve, reject) => {
+    chrome.tabs.captureVisibleTab(
+      null,
+      captureOptions,
+      (dataUrl) => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError);
+        } else {
+          resolve(dataUrl);
+        }
+      }
+    );
+  });
 }
