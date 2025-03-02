@@ -83,6 +83,9 @@ function fitToHeight(imgWidth, imgHeight) {
 
   // Apply zoom
   currentZoom = zoomRatio * 0.95; // 95% of perfect fit for a small margin
+
+  // Add transition for smooth zoom effect
+  screenshotImg.style.transition = 'transform 0.3s ease-out';
   screenshotImg.style.transform = `scale(${currentZoom})`;
   screenshotImg.style.transformOrigin = 'center top';
 
@@ -105,6 +108,9 @@ function fitToWidth(imgWidth, imgHeight) {
 
   // Apply zoom
   currentZoom = zoomRatio;
+
+  // Add transition for smooth zoom effect
+  screenshotImg.style.transition = 'transform 0.3s ease-out';
   screenshotImg.style.transform = `scale(${currentZoom})`;
   screenshotImg.style.transformOrigin = 'center top';
 
@@ -149,6 +155,10 @@ function displayScreenshot(dataUrl, hasGaps, quality, dimensions) {
     // Update the actual image
     screenshotImg.src = dataUrl;
     screenshotImg.style.display = 'block';
+
+    // Initially set transition to none for the first render
+    screenshotImg.style.transition = 'none';
+
     hideLoading();
 
     // Calculate file size
@@ -389,11 +399,22 @@ window.addEventListener('resize', function() {
     const imgWidth = screenshotImg.naturalWidth;
     const imgHeight = screenshotImg.naturalHeight;
 
+    // Temporarily disable transition during resize for better performance
+    screenshotImg.style.transition = 'none';
+
     // Maintain current zoom state but recalculate for new window size
     if (isZoomedIn) {
       fitToWidth(imgWidth, imgHeight);
     } else {
       fitToHeight(imgWidth, imgHeight);
     }
+
+    // Force a reflow before re-enabling transitions
+    void screenshotImg.offsetWidth;
+
+    // Re-enable transitions after a short delay
+    setTimeout(function() {
+      screenshotImg.style.transition = 'transform 0.3s ease-out';
+    }, 50);
   }
 });
